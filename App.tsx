@@ -87,7 +87,8 @@ const App: React.FC = () => {
           const smartStart = Math.max(lastGame.maxFret - 2, 3);
           setGameConfig(prev => ({
             ...prev,
-            startingFret: smartStart
+            startingFret: smartStart,
+            maxFretCap: TOTAL_FRETS // Reset cap to ensure progression isn't blocked by old data
           }));
         }
       } catch (e) {
@@ -107,9 +108,10 @@ const App: React.FC = () => {
     }
   };
 
-  const triggerPowerup = (currentStreak: number) => {
+  const triggerPowerup = (currentStreak: number): string | null => {
     let newPowerup: PowerupState | null = null;
     const duration = 2;
+    let message = null;
 
     if (currentStreak > 0 && currentStreak % 10 === 0) {
       newPowerup = {
@@ -147,8 +149,9 @@ const App: React.FC = () => {
 
     if (newPowerup) {
       setActivePowerup(newPowerup);
-      setFeedback({ status: 'correct', message: newPowerup.label });
+      message = newPowerup.label;
     }
+    return message;
   };
 
   const getValidNotes = useCallback((): Note[] => {
@@ -193,7 +196,9 @@ const App: React.FC = () => {
     const validNotes = getValidNotes();
     if (validNotes.length === 0) {
       console.warn("No valid notes found with current config, falling back to basic random");
-      validNotes.push({ stringIndex: 0, fretIndex: 1, noteName: 'F' });
+      // Fallback to key root if available, otherwise F
+      const fallbackNote = gameConfig.keyRoot || 'F';
+      validNotes.push({ stringIndex: 0, fretIndex: 1, noteName: fallbackNote });
     }
 
     let nextNote: Note;
@@ -309,18 +314,24 @@ const App: React.FC = () => {
       setStreak(newStreak);
       
       let delay = 800;
+      let feedbackMsg = 'Correct!';
 
-      if (newStreak % 5 === 0) {
-        triggerPowerup(newStreak);
+      // Powerup Check
+      const powerupMsg = triggerPowerup(newStreak);
+      if (powerupMsg) {
+        feedbackMsg = powerupMsg;
         delay = 1500;
-      } else {
-        setFeedback({ status: 'correct', message: 'Correct!' });
-        if (newScore > 0 && newScore % 5 === 0 && currentMaxFret < gameConfig.maxFretCap) {
-          setCurrentMaxFret(prev => Math.min(prev + 1, gameConfig.maxFretCap));
-          setFeedback({ status: 'correct', message: 'Level Up! Fretboard Expanded!' });
-          delay = 1500;
-        }
       }
+
+      // Level Up Check (Independent of Powerup)
+      if (newScore > 0 && newScore % 5 === 0 && currentMaxFret < gameConfig.maxFretCap) {
+        setCurrentMaxFret(prev => Math.min(prev + 1, gameConfig.maxFretCap));
+        // Append Level Up message if Powerup already set a message, or replace 'Correct!'
+        feedbackMsg = powerupMsg ? `${powerupMsg} + Level Up!` : 'Level Up! Fretboard Expanded!';
+        delay = 1500;
+      }
+      
+      setFeedback({ status: 'correct', message: feedbackMsg });
 
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
       feedbackTimeoutRef.current = window.setTimeout(() => {
@@ -438,7 +449,7 @@ const App: React.FC = () => {
                   <span>{showSettings ? 'Hide' : 'Customize'} Game Settings</span>
                   <span className={`transform transition-transform ${showSettings ? 'rotate-180' : ''}`}>▼</span>
                 </button>
-                <div className={`overflow-hidden transition-all duration-500 ease-in-out ${showSettings ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className={`overflow-hidden transition-all duration-500 ease-in-out ${showSettings ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0'}`}>
                   <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6 shadow-xl backdrop-blur-sm">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       <div className="space-y-6">
