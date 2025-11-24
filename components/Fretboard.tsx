@@ -159,15 +159,16 @@ const Fretboard: React.FC<FretboardProps> = ({
   };
 
   return (
-    <div className={`flex ${isVertical ? 'flex-col h-full w-full' : 'flex-row gap-6 w-full h-full max-h-[300px] min-h-[160px]'} select-none`}>
+    // Always use flex-row for root so Sidebar and Board sit side-by-side even in vertical mode
+    <div className={`flex flex-row ${isVertical ? 'h-full w-full gap-2' : 'gap-6 w-full h-full max-h-[300px] min-h-[160px]'} select-none`}>
       
-      {/* STUDY MODE SIDEBAR (Desktop Only or Top on Mobile?) - Keeping simplistic for now, mostly Desktop driven */}
-      {isStudyMode && onNoteNameToggle && !isVertical && (
-        <div className="flex flex-col gap-6 min-w-[9rem] shrink-0">
+      {/* STUDY MODE SIDEBAR */}
+      {isStudyMode && onNoteNameToggle && (
+        <div className={`flex flex-col ${isVertical ? 'w-[28%] min-w-[90px] overflow-y-auto pr-1 gap-4' : 'min-w-[9rem] shrink-0 gap-6'}`}>
           {/* Note Controls */}
            <div className="flex flex-col gap-1">
              <div className="flex justify-between px-2 mb-1 text-[10px] text-gray-500 font-bold uppercase tracking-wider">
-               <span>Key</span><span className="mr-3">Reveal</span>
+               <span>Key</span><span className={`${isVertical ? 'mr-1' : 'mr-3'}`}>Reveal</span>
              </div>
              {NOTES_SHARP.map((note) => {
                const hue = getNoteHue(note);
@@ -175,17 +176,20 @@ const Fretboard: React.FC<FretboardProps> = ({
                const isRoot = rootNote === note;
                return (
                  <div key={`sidebar-${note}`} className="flex items-center justify-between">
+                   {/* Root Selector */}
                    <button
                      onClick={() => onRootNoteSelect && onRootNoteSelect(isRoot ? null : note)}
-                     className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 ${isRoot ? 'scale-110 shadow-lg' : 'border-gray-600 hover:border-gray-400 bg-gray-800'}`}
+                     className={`rounded-full border-2 flex items-center justify-center transition-all duration-200 ${isVertical ? 'w-5 h-5' : 'w-6 h-6'} ${isRoot ? 'scale-110 shadow-lg' : 'border-gray-600 hover:border-gray-400 bg-gray-800'}`}
                      style={{ borderColor: isRoot ? `hsl(${hue}, 70%, 50%)` : undefined, backgroundColor: isRoot ? `hsl(${hue}, 70%, 20%)` : undefined }}
                    >
-                     {isRoot && <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: `hsl(${hue}, 90%, 60%)` }} />}
+                     {isRoot && <div className={`${isVertical ? 'w-2 h-2' : 'w-2.5 h-2.5'} rounded-full shadow-sm`} style={{ backgroundColor: `hsl(${hue}, 90%, 60%)` }} />}
                    </button>
+                   
+                   {/* Note Toggle */}
                    <button
                      onClick={() => onNoteNameToggle(note)}
                      style={{ backgroundColor: isSelected ? `hsl(${hue}, 70%, 25%)` : 'transparent', borderColor: `hsl(${hue}, 70%, 50%)`, color: `hsl(${hue}, 90%, 80%)` }}
-                     className={`w-16 h-8 text-xs font-bold rounded border transition-all ml-3 shadow-sm ${isSelected ? 'translate-x-1 shadow-md ring-1 ring-white/20' : 'hover:bg-gray-800 opacity-60 hover:opacity-100'}`}
+                     className={`text-xs font-bold rounded border transition-all shadow-sm ${isVertical ? 'w-10 h-7 ml-1 text-[10px]' : 'w-16 h-8 ml-3'} ${isSelected ? 'translate-x-1 shadow-md ring-1 ring-white/20' : 'hover:bg-gray-800 opacity-60 hover:opacity-100'}`}
                    >
                      {note}
                    </button>
@@ -194,8 +198,8 @@ const Fretboard: React.FC<FretboardProps> = ({
             })}
           </div>
           {/* Scale Type */}
-          <div className="flex flex-col gap-3 p-3 bg-gray-800/80 rounded-lg border border-gray-700 shadow-lg">
-             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider text-center">Scale Type</span>
+          <div className={`flex flex-col gap-3 p-3 bg-gray-800/80 rounded-lg border border-gray-700 shadow-lg ${isVertical ? 'p-2' : 'p-3'}`}>
+             <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider text-center">Scale</span>
              <div className="flex flex-col gap-2">
                 <label className="flex items-center gap-3 cursor-pointer group p-1 hover:bg-gray-700/50 rounded transition-colors">
                   <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${scaleType === 'MAJOR' ? 'border-green-400' : 'border-gray-500'}`}>{scaleType === 'MAJOR' && <div className="w-2 h-2 rounded-full bg-green-400" />}</div>
@@ -217,7 +221,7 @@ const Fretboard: React.FC<FretboardProps> = ({
         
         {/* Container for the Board + Controls (Fret/String buttons) */}
         
-        {/* 1. String Buttons (Gutter) */}
+        {/* 1. String Buttons (Gutter) - Only horizontal for now to save space on mobile */}
         {isStudyMode && !isVertical && (
             // Horizontal Gutter (Left Side)
             <div className="flex-1 flex flex-col justify-between py-4 mr-2 absolute -left-10 h-full z-20">
@@ -293,7 +297,7 @@ const Fretboard: React.FC<FretboardProps> = ({
         </div>
 
         {/* 3. Fret Labels / Buttons */}
-        <div className={`flex ${isVertical ? 'flex-col mr-1 py-[4px] w-8' : 'flex-row mt-1 px-[4px] h-8'}`}>
+        <div className={`flex ${isVertical ? 'flex-col ml-1 py-[4px] w-6' : 'flex-row mt-1 px-[4px] h-8'}`}>
            {/* Nut Button */}
            <div className={`flex-shrink-0 flex justify-center items-center ${isVertical ? 'h-16' : 'w-16'}`}>
               <button disabled={!isStudyMode} onClick={() => onFretToggle && onFretToggle(0)}
