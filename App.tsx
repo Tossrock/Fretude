@@ -398,7 +398,7 @@ const App: React.FC = () => {
   const getVisibleNotesForStudy = () => Array.from(new Set([...getActiveScaleNotes(), ...studyConfig.manuallySelectedNotes]));
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 text-white overflow-hidden select-none">
+    <div className="flex flex-col h-[100dvh] bg-gray-900 text-white overflow-hidden select-none">
       {/* Header */}
       <header className="flex-none p-4 bg-gray-800 border-b border-gray-700 shadow-md flex justify-between items-center z-30">
         <h1 className="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-orange-500 cursor-pointer" onClick={() => setGameState(GameState.MENU)}>
@@ -588,7 +588,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Feedback & Controls - Fixed Height */}
-            <div className="flex-none w-full flex flex-col items-center pb-6">
+            <div className="flex-none w-full flex flex-col items-center pb-8 md:pb-6">
               <div className={`h-6 mb-2 font-bold text-lg transition-opacity ${feedback.message ? 'opacity-100' : 'opacity-0'} ${feedback.status === 'correct' ? 'text-green-400' : 'text-red-400'}`}>
                 {feedback.message}
               </div>
