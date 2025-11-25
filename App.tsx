@@ -374,7 +374,11 @@ const App: React.FC = () => {
     setHealth(prev => {
       const newHealth = prev - 1;
       if (newHealth <= 0) {
-        stopGame();
+        // Wait for user to read feedback before stopping
+        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+        feedbackTimeoutRef.current = window.setTimeout(() => {
+          stopGame();
+        }, 2000);
         return 0;
       }
       
@@ -439,7 +443,11 @@ const App: React.FC = () => {
         setFeedback({ status: 'incorrect', message: `Wrong! It was ${correctDisplay}` });
         
         if (newHealth <= 0) {
-           setTimeout(() => stopGame(), 1000);
+           // Wait for user to read feedback before stopping
+           if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+           feedbackTimeoutRef.current = window.setTimeout(() => {
+             stopGame();
+           }, 2000);
            return 0;
         }
         
@@ -738,7 +746,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex gap-1">
                 {Array.from({ length: MAX_HEALTH }).map((_, i) => (
-                  <div key={i} className={`w-4 h-4 md:w-6 md:h-6 rounded-full transition-colors duration-300 transform-gpu ${i < health ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-gray-800'}`} />
+                  <div key={i} className={`w-4 h-4 md:w-6 md:h-6 rounded-full transition-colors duration-300 ${i < health ? 'bg-red-500' : 'bg-gray-800'}`} />
                 ))}
               </div>
             </div>
@@ -815,6 +823,15 @@ const App: React.FC = () => {
                         </button>
                       );
                     })}
+                    
+                    {/* Finish Button */}
+                    <button
+                        onClick={stopGame}
+                        disabled={isProcessing}
+                        className="min-w-[3.5rem] w-14 md:w-20 py-3 rounded-lg border-2 border-gray-700 text-gray-500 font-bold text-sm md:text-base hover:text-white hover:border-gray-500 transition-colors flex items-center justify-center opacity-80"
+                    >
+                        Finish
+                    </button>
                   </div>
                </div>
             </div>
