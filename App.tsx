@@ -270,6 +270,8 @@ const App: React.FC = () => {
     
     setTargetNote(nextNote);
     
+    const isFewerChoices = currentPowerup?.type === PowerupType.FEWER_CHOICES;
+
     if (difficulty === Difficulty.EASY) {
       let allowedDistractors = NOTES_SHARP;
       if (gameConfig.focusMode === FocusMode.NATURALS) {
@@ -279,7 +281,6 @@ const App: React.FC = () => {
       }
 
       const possibleDistractors = allowedDistractors.filter(n => n !== nextNote.noteName);
-      const isFewerChoices = currentPowerup?.type === PowerupType.FEWER_CHOICES;
       const numDistractors = isFewerChoices ? 1 : 4;
       const safeNumDistractors = Math.min(numDistractors, possibleDistractors.length);
       
@@ -287,12 +288,27 @@ const App: React.FC = () => {
       const options = [...distractors, nextNote.noteName].sort(() => 0.5 - Math.random());
       setAnswerOptions(options);
     } else {
+      // Hard Mode Logic
+      let pool = [];
       if (gameConfig.focusMode === FocusMode.NATURALS) {
-        setAnswerOptions(NATURAL_NOTES);
+        pool = NATURAL_NOTES;
       } else if (gameConfig.focusMode === FocusMode.KEY && gameConfig.keyRoot && gameConfig.keyScale) {
-         setAnswerOptions(getScaleNotes(gameConfig.keyRoot, gameConfig.keyScale));
+        pool = getScaleNotes(gameConfig.keyRoot, gameConfig.keyScale);
       } else {
-        setAnswerOptions(NOTES_SHARP);
+        pool = NOTES_SHARP;
+      }
+
+      if (isFewerChoices) {
+        // 50/50 Logic for Hard Mode: Correct + 1 Distractor
+        const distractors = pool.filter(n => n !== nextNote.noteName);
+        const randomDistractor = distractors[Math.floor(Math.random() * distractors.length)];
+        // If pool is small (e.g. key mode), handle gracefully
+        const reducedOptions = randomDistractor 
+          ? [nextNote.noteName, randomDistractor].sort(() => 0.5 - Math.random()) 
+          : [nextNote.noteName];
+        setAnswerOptions(reducedOptions);
+      } else {
+        setAnswerOptions(pool);
       }
     }
 
@@ -312,6 +328,13 @@ const App: React.FC = () => {
       }
     }, 100);
   }, [currentMaxFret, difficulty, getValidNotes, gameConfig]);
+
+  // Effect to start the game loop only after state (like maxFret) has settled
+  useEffect(() => {
+    if (gameState === GameState.PLAYING && !targetNote && !isProcessing) {
+      generateNewNote();
+    }
+  }, [gameState, targetNote, isProcessing, generateNewNote]);
 
   const stopGame = useCallback(() => {
     cleanupTimers();
@@ -445,7 +468,8 @@ const App: React.FC = () => {
     targetNoteRef.current = null;
     activePowerupRef.current = null;
     gameStateRef.current = GameState.PLAYING;
-    setTimeout(() => generateNewNote(), 0);
+    // Removed direct call to generateNewNote() here. 
+    // It will be triggered by the useEffect once state settles.
   };
 
   // ... Study Mode Handlers
@@ -714,7 +738,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex gap-1">
                 {Array.from({ length: MAX_HEALTH }).map((_, i) => (
-                  <div key={i} className={`w-4 h-4 md:w-6 md:h-6 rounded-full transition-colors duration-300 ${i < health ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.6)]' : 'bg-gray-800'}`} />
+                  <div key={i} className={`w-4 h-4 md:w-6 md:h-6 rounded-full transition-colors duration-300 transform-gpu ${i < health ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-gray-800'}`} />
                 ))}
               </div>
             </div>
