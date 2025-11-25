@@ -1,4 +1,5 @@
 
+
 import React, { useState } from 'react';
 import { Note, PowerupState, PowerupType, ScaleType } from '../types';
 import { getNoteAtPosition, getNoteColor, getNoteHue, NOTES_SHARP, getDisplayNoteName } from '../constants';
@@ -124,7 +125,7 @@ const Fretboard: React.FC<FretboardProps> = ({
     
     // Determine display name (accidental handling)
     const displayNote = revealedNote 
-      ? getDisplayNoteName(revealedNote, rootNote, (scaleType === 'MAJOR' || scaleType === 'NATURAL_MINOR') ? scaleType : null)
+      ? getDisplayNoteName(revealedNote, rootNote, scaleType)
       : null;
     
     // Sizing for dots
@@ -201,7 +202,7 @@ const Fretboard: React.FC<FretboardProps> = ({
                const isMinorActive = activeChords?.some(c => c.root === note && c.type === 'NATURAL_MINOR');
 
                // Display name with current context
-               const displayName = getDisplayNoteName(note, rootNote, (scaleType === 'MAJOR' || scaleType === 'NATURAL_MINOR') ? scaleType : null);
+               const displayName = getDisplayNoteName(note, rootNote, scaleType);
 
                return (
                  <div key={`sidebar-${note}`} className="grid grid-cols-4 items-center gap-1">

@@ -16,11 +16,22 @@ export const TOTAL_FRETS = 12; // Focus on first octave for the app
 export const MAX_HEALTH = 5;
 export const TIME_LIMIT_MS = 10000; // 10 seconds per question
 
-// Key Signatures that prefer Flats
-const PREFER_FLATS_MAJOR = ['F', 'A#', 'D#', 'G#', 'C#'];
-const PREFER_FLATS_MINOR = ['D', 'G', 'C', 'F', 'A#', 'D#'];
+// Key Signatures that prefer Flats (Relative Major Roots)
+// F (1b), A#/Bb (2b), D#/Eb (3b), G#/Ab (4b), C#/Db (5b), F#/Gb (6b)
+const PREFER_FLATS_MAJOR = ['F', 'A#', 'D#', 'G#', 'C#', 'F#'];
 
-export const getDisplayNoteName = (noteName: string, keyRoot?: string | null, keyScale?: 'MAJOR' | 'NATURAL_MINOR' | null): string => {
+// Offset of the mode from its Relative Major
+const MODE_OFFSETS: Record<string, number> = {
+  'MAJOR': 0,
+  'DORIAN': 2,
+  'PHRYGIAN': 4,
+  'LYDIAN': 5,
+  'MIXOLYDIAN': 7,
+  'NATURAL_MINOR': 9,
+  'LOCRIAN': 11
+};
+
+export const getDisplayNoteName = (noteName: string, keyRoot?: string | null, keyScale?: string | null): string => {
   if (!noteName.includes('#')) return noteName;
 
   const noteIndex = NOTES_SHARP.indexOf(noteName);
@@ -28,11 +39,20 @@ export const getDisplayNoteName = (noteName: string, keyRoot?: string | null, ke
 
   // Determine accidental preference based on Key
   let useFlat = false;
-  if (keyRoot && keyScale) {
-    if (keyScale === 'MAJOR') {
-      useFlat = PREFER_FLATS_MAJOR.includes(keyRoot);
-    } else if (keyScale === 'NATURAL_MINOR') {
-      useFlat = PREFER_FLATS_MINOR.includes(keyRoot);
+  
+  if (keyRoot && keyScale && MODE_OFFSETS.hasOwnProperty(keyScale)) {
+    const rootIndex = NOTES_SHARP.indexOf(keyRoot);
+    if (rootIndex !== -1) {
+       const offset = MODE_OFFSETS[keyScale];
+       // Calculate Relative Major Root Index
+       // relativeMajor = (root - offset) % 12
+       let relativeMajorIndex = (rootIndex - offset) % 12;
+       if (relativeMajorIndex < 0) relativeMajorIndex += 12;
+       
+       const relativeMajorRoot = NOTES_SHARP[relativeMajorIndex];
+       if (PREFER_FLATS_MAJOR.includes(relativeMajorRoot)) {
+         useFlat = true;
+       }
     }
   }
 

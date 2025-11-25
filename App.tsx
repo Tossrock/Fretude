@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig } from './types';
 import { NOTES_SHARP, NATURAL_NOTES, OPEN_STRING_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes } from './constants';
@@ -297,7 +298,7 @@ const App: React.FC = () => {
     const correctNote = targetNoteRef.current?.noteName || '?';
     const displayCorrect = getDisplayNoteName(correctNote, 
       gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
-      (gameConfig.focusMode === FocusMode.KEY && (gameConfig.keyScale === 'MAJOR' || gameConfig.keyScale === 'NATURAL_MINOR')) ? gameConfig.keyScale : null
+      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
     );
 
     setFeedback({ status: 'incorrect', message: `Time up! It was ${displayCorrect}` });
@@ -367,7 +368,7 @@ const App: React.FC = () => {
         const newHealth = prev - 1;
         const correctDisplay = getDisplayNoteName(targetNote.noteName, 
            gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
-           (gameConfig.focusMode === FocusMode.KEY && (gameConfig.keyScale === 'MAJOR' || gameConfig.keyScale === 'NATURAL_MINOR')) ? gameConfig.keyScale : null
+           gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
         );
         setFeedback({ status: 'incorrect', message: `Wrong! It was ${correctDisplay}` });
         
@@ -681,7 +682,7 @@ const App: React.FC = () => {
                       const displayNote = getDisplayNoteName(
                          note, 
                          gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null, 
-                         (gameConfig.focusMode === FocusMode.KEY && (gameConfig.keyScale === 'MAJOR' || gameConfig.keyScale === 'NATURAL_MINOR')) ? gameConfig.keyScale : null
+                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
                       );
                       
                       const isSelected = note === selectedAnswer;
