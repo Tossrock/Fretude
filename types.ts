@@ -63,6 +63,7 @@ export type ScaleType = 'MAJOR' | 'NATURAL_MINOR' | null;
 
 export interface StudyConfig {
   rootNote: string | null;
+  chordRoot: string | null; // Added for Chord Mode
   scaleType: ScaleType;
   manuallySelectedNotes: string[]; // Note names e.g. "C", "F#"
   activeStrings: number[]; // Indices 0-5

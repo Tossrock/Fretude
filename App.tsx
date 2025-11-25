@@ -1,7 +1,8 @@
 
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig } from './types';
-import { NOTES_SHARP, NATURAL_NOTES, OPEN_STRING_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes } from './constants';
+import { NOTES_SHARP, NATURAL_NOTES, OPEN_STRING_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes } from './constants';
 import Fretboard from './components/Fretboard';
 import StatsChart from './components/StatsChart';
 
@@ -32,6 +33,10 @@ const App: React.FC = () => {
   const [activePowerup, setActivePowerup] = useState<PowerupState | null>(null);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   
+  // New state for blocking input and visual feedback
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+  
   const isMobile = useIsMobile();
 
   // Game Configuration State
@@ -47,6 +52,7 @@ const App: React.FC = () => {
   // Study Mode State
   const [studyConfig, setStudyConfig] = useState<StudyConfig>({
     rootNote: null,
+    chordRoot: null,
     scaleType: null,
     manuallySelectedNotes: [],
     activeStrings: [],
@@ -181,6 +187,10 @@ const App: React.FC = () => {
 
   const generateNewNote = useCallback(() => {
     if (gameStateRef.current !== GameState.PLAYING) return;
+    
+    // Clear processing blocking
+    setIsProcessing(false);
+    setSelectedAnswer(null);
 
     const currentPowerup = activePowerupRef.current;
     
@@ -280,9 +290,18 @@ const App: React.FC = () => {
   const handleTimeout = () => {
     if (gameStateRef.current !== GameState.PLAYING) return;
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    
+    // Block Input
+    setIsProcessing(true);
+    
+    // Format the note for feedback message
     const correctNote = targetNoteRef.current?.noteName || '?';
+    const displayCorrect = getDisplayNoteName(correctNote, 
+      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
+      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+    );
 
-    setFeedback({ status: 'incorrect', message: `Time up! It was ${correctNote}` });
+    setFeedback({ status: 'incorrect', message: `Time up! It was ${displayCorrect}` });
     setStreak(0);
     setActivePowerup(null);
     
@@ -304,8 +323,11 @@ const App: React.FC = () => {
   };
 
   const checkAnswer = (selectedNote: string) => {
-    if (!targetNote) return;
+    if (!targetNote || isProcessing) return; // Block if already processing
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    
+    setIsProcessing(true);
+    setSelectedAnswer(selectedNote);
 
     if (selectedNote === targetNote.noteName) {
       const newScore = score + 1;
@@ -344,7 +366,11 @@ const App: React.FC = () => {
       setActivePowerup(null);
       setHealth(prev => {
         const newHealth = prev - 1;
-        setFeedback({ status: 'incorrect', message: `Wrong! It was ${targetNote.noteName}` });
+        const correctDisplay = getDisplayNoteName(targetNote.noteName, 
+           gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
+           gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+        );
+        setFeedback({ status: 'incorrect', message: `Wrong! It was ${correctDisplay}` });
         
         if (newHealth <= 0) {
            setTimeout(() => stopGame(), 1000);
@@ -371,13 +397,15 @@ const App: React.FC = () => {
     setFeedback({ status: 'neutral', message: '' });
     setTargetNote(null); 
     setGameState(GameState.PLAYING);
+    setIsProcessing(false);
+    setSelectedAnswer(null);
     targetNoteRef.current = null;
     activePowerupRef.current = null;
     gameStateRef.current = GameState.PLAYING;
     setTimeout(() => generateNewNote(), 0);
   };
 
-  // ... Study Mode Handlers (same as before) ...
+  // ... Study Mode Handlers
   const toggleStudyNote = (note: string) => {
     setStudyConfig(prev => {
       const exists = prev.manuallySelectedNotes.includes(note);
@@ -402,11 +430,24 @@ const App: React.FC = () => {
   const handleRootNoteSelect = (note: string | null) => {
     setStudyConfig(prev => ({ ...prev, rootNote: note, scaleType: note && !prev.scaleType ? 'MAJOR' : prev.scaleType }));
   };
+  const handleChordRootSelect = (note: string | null) => {
+    setStudyConfig(prev => ({ ...prev, chordRoot: note, scaleType: note && !prev.scaleType ? 'MAJOR' : prev.scaleType }));
+  };
   const handleScaleTypeSelect = (type: ScaleType) => {
     setStudyConfig(prev => ({ ...prev, scaleType: type }));
   };
+  
+  // Calculate Visible Notes for Study Mode
   const getActiveScaleNotes = () => studyConfig.rootNote && studyConfig.scaleType ? getScaleNotes(studyConfig.rootNote, studyConfig.scaleType) : [];
-  const getVisibleNotesForStudy = () => Array.from(new Set([...getActiveScaleNotes(), ...studyConfig.manuallySelectedNotes]));
+  const getActiveChordNotes = () => studyConfig.chordRoot && studyConfig.scaleType ? getChordNotes(studyConfig.chordRoot, studyConfig.scaleType) : [];
+  
+  const getVisibleNotesForStudy = () => {
+    const scale = getActiveScaleNotes();
+    const chord = getActiveChordNotes();
+    const manual = studyConfig.manuallySelectedNotes;
+    // Combine all unique notes
+    return Array.from(new Set([...scale, ...chord, ...manual]));
+  };
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-900 text-white overflow-hidden select-none">
@@ -441,7 +482,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex flex-col md:flex-row gap-4 w-full max-w-lg">
                   <button onClick={startGame} className="flex-1 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl font-bold text-lg shadow-xl shadow-blue-900/20 transition-all transform hover:-translate-y-1">Start Game</button>
-                  <button onClick={() => setGameState(GameState.STUDY)} className="px-6 py-4 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold transition-all border border-gray-600">Study Mode</button>
+                  <button onClick={() => setStudyConfig({ rootNote: null, chordRoot: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} onClickCapture={() => setGameState(GameState.STUDY)} className="px-6 py-4 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold transition-all border border-gray-600">Study Mode</button>
               </div>
               
               <div className="w-full max-w-3xl">
@@ -525,8 +566,8 @@ const App: React.FC = () => {
                 <div className="flex flex-wrap justify-between items-center gap-4">
                   <h2 className="text-xl font-bold text-blue-400">Fretboard Explorer</h2>
                   <div className="flex gap-2">
-                    <button onClick={() => setStudyConfig({ rootNote: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} className="px-3 py-1 bg-red-900/50 text-red-300 rounded text-xs hover:bg-red-900">Clear All</button>
-                    <button onClick={() => { setStudyConfig({ rootNote: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] }); setGameState(GameState.MENU); }} className="px-4 py-2 bg-gray-700 rounded text-sm hover:bg-gray-600">Back to Menu</button>
+                    <button onClick={() => setStudyConfig({ rootNote: null, chordRoot: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} className="px-3 py-1 bg-red-900/50 text-red-300 rounded text-xs hover:bg-red-900">Clear All</button>
+                    <button onClick={() => { setStudyConfig({ rootNote: null, chordRoot: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] }); setGameState(GameState.MENU); }} className="px-4 py-2 bg-gray-700 rounded text-sm hover:bg-gray-600">Back to Menu</button>
                   </div>
                 </div>
              </div>
@@ -541,11 +582,13 @@ const App: React.FC = () => {
                     scaleNotes={getActiveScaleNotes()}
                     highlightLocations={{ strings: studyConfig.activeStrings, frets: studyConfig.activeFrets }}
                     rootNote={studyConfig.rootNote}
+                    chordRoot={studyConfig.chordRoot}
                     scaleType={studyConfig.scaleType}
                     onNoteNameToggle={toggleStudyNote}
                     onStringToggle={toggleStudyString}
                     onFretToggle={toggleStudyFret}
                     onRootNoteSelect={handleRootNoteSelect}
+                    onChordRootSelect={handleChordRootSelect}
                     onScaleTypeSelect={handleScaleTypeSelect}
                     orientation={isMobile ? 'vertical' : 'horizontal'}
                  />
@@ -586,39 +629,64 @@ const App: React.FC = () => {
                <div className={`h-full transition-all duration-100 ease-linear ${timer < 30 ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${timer}%` }} />
             </div>
 
-            {/* Flexible Game Board Area */}
-            <div className="flex-1 w-full flex justify-center mb-4 overflow-hidden relative min-h-0">
-               <div className="w-full h-full max-w-5xl px-2 flex flex-col justify-center">
-                 <Fretboard 
-                    activeNote={targetNote} 
-                    maxFret={currentMaxFret} 
-                    activePowerup={activePowerup} 
-                    orientation={isMobile ? 'vertical' : 'horizontal'}
-                 />
+            {/* Game Board + Controls Container */}
+            <div className="w-full flex flex-col md:flex-col relative min-h-0 md:justify-center flex-1">
+               {/* Fretboard Section */}
+               <div className="w-full px-2 flex flex-col items-center justify-center mb-4 flex-1 min-h-0"> {/* Added min-h-0 for nested flex scroll issues prevention, though likely not needed here, but good practice. Changed flex-initial to flex-1 */}
+                 <div className="w-full max-w-5xl h-full"> {/* Removed md:h-auto */}
+                    <Fretboard 
+                        activeNote={targetNote} 
+                        maxFret={currentMaxFret} 
+                        activePowerup={activePowerup} 
+                        orientation={isMobile ? 'vertical' : 'horizontal'}
+                        rootNote={gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null}
+                        scaleType={gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null}
+                    />
+                 </div>
                </div>
-            </div>
+               
+               {/* Controls Section */}
+               <div className="flex-none w-full flex flex-col items-center pb-8 md:pb-0">
+                  <div className={`h-6 mb-2 font-bold text-lg transition-opacity ${feedback.message ? 'opacity-100' : 'opacity-0'} ${feedback.status === 'correct' ? 'text-green-400' : 'text-red-400'}`}>
+                    {feedback.message}
+                  </div>
 
-            {/* Feedback & Controls - Fixed Height */}
-            <div className="flex-none w-full flex flex-col items-center pb-8 md:pb-6">
-              <div className={`h-6 mb-2 font-bold text-lg transition-opacity ${feedback.message ? 'opacity-100' : 'opacity-0'} ${feedback.status === 'correct' ? 'text-green-400' : 'text-red-400'}`}>
-                {feedback.message}
-              </div>
+                  <div className="w-full max-w-2xl flex flex-wrap justify-center gap-2 md:gap-4 px-4">
+                    {answerOptions.map((note) => {
+                      const hue = getNoteHue(note);
+                      // Formatted note for display
+                      const displayNote = getDisplayNoteName(
+                         note, 
+                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null, 
+                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+                      );
+                      
+                      const isSelected = note === selectedAnswer;
+                      const processingStyle = isProcessing 
+                         ? (isSelected ? 'opacity-100 ring-2 ring-white scale-105' : 'opacity-30 grayscale cursor-not-allowed scale-95 border-gray-700 bg-gray-900')
+                         : 'hover:bg-gray-700 hover:shadow-lg active:scale-95';
 
-              <div className="w-full max-w-2xl flex flex-wrap justify-center gap-2 md:gap-4 px-4">
-                {answerOptions.map((note) => {
-                  const hue = getNoteHue(note);
-                  return (
-                    <button
-                      key={note}
-                      onClick={() => checkAnswer(note)}
-                      style={{ borderColor: `hsl(${hue}, 70%, 50%)`, color: `hsl(${hue}, 90%, 75%)`, textShadow: `0 0 10px hsl(${hue}, 70%, 20%)` }}
-                      className="min-w-[3.5rem] w-14 md:w-20 py-3 rounded-lg bg-gray-800 border-2 hover:bg-gray-700 transition-all font-bold text-base md:text-lg active:scale-95 shadow-md hover:shadow-lg"
-                    >
-                      {note}
-                    </button>
-                  );
-                })}
-              </div>
+                      return (
+                        <button
+                          key={note}
+                          onClick={() => checkAnswer(note)}
+                          disabled={isProcessing}
+                          style={{ 
+                             borderColor: isProcessing && !isSelected ? 'transparent' : `hsl(${hue}, 70%, 50%)`, 
+                             color: isProcessing && !isSelected ? '#6b7280' : `hsl(${hue}, 90%, 75%)`, 
+                             textShadow: isProcessing && !isSelected ? 'none' : `0 0 10px hsl(${hue}, 70%, 20%)` 
+                          }}
+                          className={`
+                            min-w-[3.5rem] w-14 md:w-20 py-3 rounded-lg bg-gray-800 border-2 transition-all font-bold text-base md:text-lg shadow-md
+                            ${processingStyle}
+                          `}
+                        >
+                          {displayNote}
+                        </button>
+                      );
+                    })}
+                  </div>
+               </div>
             </div>
           </div>
         )}
