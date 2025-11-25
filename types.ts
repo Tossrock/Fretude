@@ -89,3 +89,5 @@ export interface TuningPreset {
   name: string;
   offsets: number[]; // Low String (0) to High String (5)
 }
+
+export type AccidentalStyle = 'SHARP' | 'FLAT';

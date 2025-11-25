@@ -1,5 +1,5 @@
 
-import { TuningPreset } from "./types";
+import { TuningPreset, AccidentalStyle } from "./types";
 
 export const NOTES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const NOTES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -41,7 +41,12 @@ const MODE_OFFSETS: Record<string, number> = {
   'LOCRIAN': 11
 };
 
-export const getDisplayNoteName = (noteName: string, keyRoot?: string | null, keyScale?: string | null): string => {
+export const getDisplayNoteName = (
+  noteName: string, 
+  keyRoot?: string | null, 
+  keyScale?: string | null, 
+  accidentalPreference: AccidentalStyle = 'SHARP'
+): string => {
   if (!noteName.includes('#')) return noteName;
 
   const noteIndex = NOTES_SHARP.indexOf(noteName);
@@ -49,8 +54,10 @@ export const getDisplayNoteName = (noteName: string, keyRoot?: string | null, ke
 
   // Determine accidental preference based on Key
   let useFlat = false;
+  let keyContextFound = false;
   
   if (keyRoot && keyScale && MODE_OFFSETS.hasOwnProperty(keyScale)) {
+    keyContextFound = true;
     const rootIndex = NOTES_SHARP.indexOf(keyRoot);
     if (rootIndex !== -1) {
        const offset = MODE_OFFSETS[keyScale];
@@ -63,6 +70,13 @@ export const getDisplayNoteName = (noteName: string, keyRoot?: string | null, ke
        if (PREFER_FLATS_MAJOR.includes(relativeMajorRoot)) {
          useFlat = true;
        }
+    }
+  }
+
+  // If no authoritative key context overrides, use the global preference
+  if (!keyContextFound) {
+    if (accidentalPreference === 'FLAT') {
+      useFlat = true;
     }
   }
 

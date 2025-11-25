@@ -1,23 +1,27 @@
 
 import React, { useState } from 'react';
-import { GuitarProfile, TuningPreset } from '../types';
-import { TUNING_PRESETS, getOffsetNoteName, NOTES_SHARP, STANDARD_TUNING_OFFSETS } from '../constants';
+import { GuitarProfile, TuningPreset, AccidentalStyle } from '../types';
+import { TUNING_PRESETS, getOffsetNoteName, STANDARD_TUNING_OFFSETS } from '../constants';
 
 interface GuitarSettingsProps {
   profiles: GuitarProfile[];
   activeProfileId: string;
+  accidentalPreference: AccidentalStyle;
   onProfileChange: (profileId: string) => void;
   onProfileUpdate: (updatedProfile: GuitarProfile) => void;
   onProfileCreate: (newProfile: GuitarProfile) => void;
+  onAccidentalPreferenceChange: (pref: AccidentalStyle) => void;
   onClose: () => void;
 }
 
 const GuitarSettings: React.FC<GuitarSettingsProps> = ({
   profiles,
   activeProfileId,
+  accidentalPreference,
   onProfileChange,
   onProfileUpdate,
   onProfileCreate,
+  onAccidentalPreferenceChange,
   onClose
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -80,22 +84,10 @@ const GuitarSettings: React.FC<GuitarSettingsProps> = ({
   };
 
   // Helper to generate selectable pitch options for "Custom" tuning
-  // Range: From C2 (-4) to E4 (24) roughly
   const generatePitchOptions = () => {
     const options = [];
     for (let i = -8; i <= 24; i++) {
       const noteName = getOffsetNoteName(i);
-      // Rough octave estimation: E2 is 0.
-      let octave = 2;
-      if (i >= 20) octave = 4;
-      else if (i >= 8) octave = 3;
-      else if (i < -3) octave = 1;
-      
-      // Fine tuning octave display logic relative to C
-      // C2 is -4 relative to E2=0? 
-      // E2 (0). C2 is 4 semitones down from E2.
-      // C: 0, C#: 1... E: 4.
-      // So C2 is offset -4. C3 is offset 8. C4 is offset 20.
       let displayOctave = 2;
       if (i >= 20) displayOctave = 4;
       else if (i >= 8) displayOctave = 3;
@@ -111,7 +103,7 @@ const GuitarSettings: React.FC<GuitarSettingsProps> = ({
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
         <div className="flex justify-between items-center p-6 border-b border-gray-700 bg-gray-900">
-          <h2 className="text-2xl font-bold text-white">Guitar Configuration</h2>
+          <h2 className="text-2xl font-bold text-white">Settings</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -121,9 +113,31 @@ const GuitarSettings: React.FC<GuitarSettingsProps> = ({
 
         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
           
+          {/* General Configuration */}
+          <div className="space-y-4 pb-6 border-b border-gray-700">
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">General Configuration</h3>
+            <div className="flex items-center justify-between bg-gray-800 p-4 rounded-xl border border-gray-700">
+               <span className="font-bold text-white">Accidentals</span>
+               <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-600">
+                  <button 
+                    onClick={() => onAccidentalPreferenceChange('SHARP')}
+                    className={`px-4 py-1.5 rounded font-bold text-sm transition-all ${accidentalPreference === 'SHARP' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    ♯
+                  </button>
+                  <button 
+                    onClick={() => onAccidentalPreferenceChange('FLAT')}
+                    className={`px-4 py-1.5 rounded font-bold text-sm transition-all ${accidentalPreference === 'FLAT' ? 'bg-gray-700 text-white shadow-sm' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    ♭
+                  </button>
+               </div>
+            </div>
+          </div>
+
           {/* Active Profile Selection */}
           <div className="space-y-4">
-            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Select Active Guitar</label>
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Guitar Configuration</label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {profiles.map(profile => (
                 <button

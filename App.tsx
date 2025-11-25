@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile } from './types';
+import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle } from './types';
 import { NOTES_SHARP, NATURAL_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes, STANDARD_TUNING_OFFSETS } from './constants';
 import Fretboard from './components/Fretboard';
 import StatsChart from './components/StatsChart';
@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const [guitarProfiles, setGuitarProfiles] = useState<GuitarProfile[]>([DEFAULT_GUITAR]);
   const [activeGuitarId, setActiveGuitarId] = useState<string>('default');
   const [showGuitarSettings, setShowGuitarSettings] = useState<boolean>(false);
+  const [accidentalPreference, setAccidentalPreference] = useState<AccidentalStyle>('SHARP');
 
   // New state for blocking input and visual feedback
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -132,6 +133,11 @@ const App: React.FC = () => {
     if (savedActiveGuitarId) {
        setActiveGuitarId(savedActiveGuitarId);
     }
+    
+    const savedAccidentalPref = localStorage.getItem('fretmaster_accidental_pref');
+    if (savedAccidentalPref === 'FLAT' || savedAccidentalPref === 'SHARP') {
+      setAccidentalPreference(savedAccidentalPref as AccidentalStyle);
+    }
 
   }, []);
 
@@ -140,6 +146,11 @@ const App: React.FC = () => {
      setActiveGuitarId(activeId);
      localStorage.setItem('fretmaster_guitars', JSON.stringify(profiles));
      localStorage.setItem('fretmaster_active_guitar', activeId);
+  };
+  
+  const saveAccidentalPreference = (pref: AccidentalStyle) => {
+    setAccidentalPreference(pref);
+    localStorage.setItem('fretmaster_accidental_pref', pref);
   };
 
   const cleanupTimers = () => {
@@ -364,7 +375,8 @@ const App: React.FC = () => {
     const correctNote = targetNoteRef.current?.noteName || '?';
     const displayCorrect = getDisplayNoteName(correctNote, 
       gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
-      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null,
+      accidentalPreference
     );
 
     setFeedback({ status: 'incorrect', message: `Time up! It was ${displayCorrect}` });
@@ -438,7 +450,8 @@ const App: React.FC = () => {
         const newHealth = prev - 1;
         const correctDisplay = getDisplayNoteName(targetNote.noteName, 
            gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
-           gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+           gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null,
+           accidentalPreference
         );
         setFeedback({ status: 'incorrect', message: `Wrong! It was ${correctDisplay}` });
         
@@ -550,6 +563,7 @@ const App: React.FC = () => {
         <GuitarSettings
           profiles={guitarProfiles}
           activeProfileId={activeGuitarId}
+          accidentalPreference={accidentalPreference}
           onProfileChange={(id) => saveGuitars(guitarProfiles, id)}
           onProfileUpdate={(updated) => {
              const newProfiles = guitarProfiles.map(p => p.id === updated.id ? updated : p);
@@ -559,6 +573,7 @@ const App: React.FC = () => {
              const newProfiles = [...guitarProfiles, newProfile];
              saveGuitars(newProfiles, activeGuitarId);
           }}
+          onAccidentalPreferenceChange={saveAccidentalPreference}
           onClose={() => setShowGuitarSettings(false)}
         />
       )}
@@ -728,6 +743,7 @@ const App: React.FC = () => {
                     onBackToMenu={() => { setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] }); setGameState(GameState.MENU); }}
                     orientation={isMobile ? 'vertical' : 'horizontal'}
                     tuningOffsets={activeGuitar.tuning}
+                    accidentalPreference={accidentalPreference}
                  />
                </div>
             </div>
@@ -779,6 +795,7 @@ const App: React.FC = () => {
                         rootNote={gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null}
                         scaleType={gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null}
                         tuningOffsets={activeGuitar.tuning}
+                        accidentalPreference={accidentalPreference}
                     />
                  </div>
                </div>
@@ -796,7 +813,8 @@ const App: React.FC = () => {
                       const displayNote = getDisplayNoteName(
                          note, 
                          gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null, 
-                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null,
+                         accidentalPreference
                       );
                       
                       const isSelected = note === selectedAnswer;

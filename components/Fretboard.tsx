@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Note, PowerupState, PowerupType, ScaleType } from '../types';
+import { Note, PowerupState, PowerupType, ScaleType, AccidentalStyle } from '../types';
 import { getNoteAtPosition, getNoteColor, getNoteHue, NOTES_SHARP, getDisplayNoteName, STANDARD_TUNING_OFFSETS } from '../constants';
 
 interface FretboardProps {
@@ -31,6 +31,7 @@ interface FretboardProps {
   
   // Tuning
   tuningOffsets?: number[]; // Array of offsets relative to E2
+  accidentalPreference?: AccidentalStyle;
 }
 
 const Fretboard: React.FC<FretboardProps> = ({ 
@@ -53,7 +54,8 @@ const Fretboard: React.FC<FretboardProps> = ({
   onBackToMenu,
   isStudyMode = false,
   orientation = 'horizontal',
-  tuningOffsets = STANDARD_TUNING_OFFSETS
+  tuningOffsets = STANDARD_TUNING_OFFSETS,
+  accidentalPreference = 'SHARP'
 }) => {
   const isVertical = orientation === 'vertical';
   const [showAdvancedScales, setShowAdvancedScales] = useState(false);
@@ -130,7 +132,7 @@ const Fretboard: React.FC<FretboardProps> = ({
     
     // Determine display name (accidental handling)
     const displayNote = revealedNote 
-      ? getDisplayNoteName(revealedNote, rootNote, scaleType)
+      ? getDisplayNoteName(revealedNote, rootNote, scaleType, accidentalPreference as AccidentalStyle)
       : null;
     
     // Sizing for dots
@@ -207,7 +209,7 @@ const Fretboard: React.FC<FretboardProps> = ({
                const isMinorActive = activeChords?.some(c => c.root === note && c.type === 'NATURAL_MINOR');
 
                // Display name with current context
-               const displayName = getDisplayNoteName(note, rootNote, scaleType);
+               const displayName = getDisplayNoteName(note, rootNote, scaleType, accidentalPreference as AccidentalStyle);
 
                return (
                  <div key={`sidebar-${note}`} className="grid grid-cols-4 items-center gap-1">
