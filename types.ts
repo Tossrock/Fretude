@@ -71,9 +71,21 @@ export type ScaleType =
 
 export interface StudyConfig {
   rootNote: string | null;
-  activeChords: { root: string; type: 'MAJOR' | 'NATURAL_MINOR' }[]; // Changed to support multiple chords
+  activeChords: { root: string; type: 'MAJOR' | 'NATURAL_MINOR' }[];
   scaleType: ScaleType;
   manuallySelectedNotes: string[]; // Note names e.g. "C", "F#"
   activeStrings: number[]; // Indices 0-5
   activeFrets: number[]; // Indices 1-12
+}
+
+export interface GuitarProfile {
+  id: string;
+  name: string;
+  tuningName: string; // e.g., "Standard", "Drop D"
+  tuning: number[]; // Array of 6 integers. 0 = E2. -2 = D2. 5 = A2.
+}
+
+export interface TuningPreset {
+  name: string;
+  offsets: number[]; // Low String (0) to High String (5)
 }

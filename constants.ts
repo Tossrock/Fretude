@@ -1,16 +1,26 @@
 
+import { TuningPreset } from "./types";
 
 export const NOTES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const NOTES_FLAT = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 export const NATURAL_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 
-export const OPEN_STRING_NOTES = ['E', 'A', 'D', 'G', 'B', 'E']; // Low E (0) to High E (5)
-
-// Semitone offset from Low E (E2) for each string
+// Standard Tuning Offsets relative to E2 (0)
 // E2=0, A2=5, D3=10, G3=15, B3=19, E4=24
-export const STRING_PITCH_OFFSETS = [0, 5, 10, 15, 19, 24]; 
+export const STANDARD_TUNING_OFFSETS = [0, 5, 10, 15, 19, 24];
 
-// Initial max fret for Level 1
+export const TUNING_PRESETS: TuningPreset[] = [
+  { name: 'Standard (EADGBE)', offsets: [0, 5, 10, 15, 19, 24] },
+  { name: 'Drop D (DADGBE)', offsets: [-2, 5, 10, 15, 19, 24] },
+  { name: 'Double Drop D (DADGBD)', offsets: [-2, 5, 10, 15, 19, 22] },
+  { name: 'DADGAD', offsets: [-2, 5, 10, 15, 17, 22] },
+  { name: 'Open D (DADF#AD)', offsets: [-2, 5, 10, 14, 17, 22] },
+  { name: 'Open G (DGDGBD)', offsets: [-2, 3, 10, 15, 19, 22] },
+  { name: 'Open C (CGCGCE)', offsets: [-4, 3, 8, 15, 20, 24] },
+  { name: 'Half Step Down', offsets: [-1, 4, 9, 14, 18, 23] },
+  { name: 'Whole Step Down', offsets: [-2, 3, 8, 13, 17, 22] },
+];
+
 export const INITIAL_MAX_FRET = 3;
 export const TOTAL_FRETS = 12; // Focus on first octave for the app
 export const MAX_HEALTH = 5;
@@ -65,11 +75,17 @@ export const getDisplayNoteName = (noteName: string, keyRoot?: string | null, ke
   return noteName.replace('#', '♯');
 };
 
-export const getNoteAtPosition = (stringIndex: number, fretIndex: number): string => {
-  const openNote = OPEN_STRING_NOTES[stringIndex];
-  const openNoteIndex = NOTES_SHARP.indexOf(openNote);
-  const noteIndex = (openNoteIndex + fretIndex) % 12;
-  return NOTES_SHARP[noteIndex];
+/**
+ * Calculates note name based on string tuning offset and fret.
+ * @param stringOffset Semitones relative to E2 (0)
+ * @param fretIndex Fret number
+ */
+export const getNoteAtPosition = (stringOffset: number, fretIndex: number): string => {
+  // E is index 4 in NOTES_SHARP ['C', 'C#', 'D', 'D#', 'E'...]
+  const baseIndex = 4; 
+  let absoluteIndex = (baseIndex + stringOffset + fretIndex) % 12;
+  if (absoluteIndex < 0) absoluteIndex += 12;
+  return NOTES_SHARP[absoluteIndex];
 };
 
 export const getNoteHue = (noteName: string): number => {
@@ -88,27 +104,23 @@ export const getNoteHue = (noteName: string): number => {
 /**
  * Returns a CSS HSL string based on Note Hue + Pitch-based Saturation/Lightness
  * @param noteName The note (e.g. "C#")
- * @param stringIndex 0 (Low E) to 5 (High E)
+ * @param stringOffset Semitones relative to E2 (0)
  * @param fretIndex Fret number
  */
-export const getNoteColor = (noteName: string, stringIndex: number, fretIndex: number): string => {
+export const getNoteColor = (noteName: string, stringOffset: number, fretIndex: number): string => {
   const hue = getNoteHue(noteName);
   
   // Calculate absolute semitone index relative to Low E (0)
   // Low E (Str 0, Fret 0) = 0
-  // Middle C (C4) is roughly index 20 (Str 4/B, Fret 1)
-  const pitchIndex = STRING_PITCH_OFFSETS[stringIndex] + fretIndex;
+  const pitchIndex = stringOffset + fretIndex;
   
   // Saturation Logic:
-  // Peak at Middle C (~ index 20) at 95%.
-  // Drop to ~75% at extremes (0 and ~36).
+  // Peak at Middle C (~ index 20).
   const distFromMiddleC = Math.abs(pitchIndex - 20);
   const saturation = Math.max(70, 95 - (distFromMiddleC * 1.2));
 
   // Lightness (Value) Logic:
   // Increase brightness as pitch goes higher.
-  // Base 25% (very dark/low) to 85% (very bright/high).
-  // Pitch index 0 -> 36 (approx range for 12 frets)
   const lightness = Math.min(85, Math.max(30, 30 + (pitchIndex * 1.2)));
 
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
@@ -149,3 +161,10 @@ export const getChordNotes = (root: string, type: 'MAJOR' | 'NATURAL_MINOR'): st
     return NOTES_SHARP[noteIndex];
   });
 };
+
+export const getOffsetNoteName = (offset: number): string => {
+  const baseIndex = 4; // E
+  let absoluteIndex = (baseIndex + offset) % 12;
+  if (absoluteIndex < 0) absoluteIndex += 12;
+  return NOTES_SHARP[absoluteIndex];
+}

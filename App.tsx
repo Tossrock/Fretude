@@ -1,10 +1,10 @@
 
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig } from './types';
-import { NOTES_SHARP, NATURAL_NOTES, OPEN_STRING_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes } from './constants';
+import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile } from './types';
+import { NOTES_SHARP, NATURAL_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes, STANDARD_TUNING_OFFSETS } from './constants';
 import Fretboard from './components/Fretboard';
 import StatsChart from './components/StatsChart';
+import GuitarSettings from './components/GuitarSettings';
 
 // Hook for mobile detection
 const useIsMobile = () => {
@@ -15,6 +15,13 @@ const useIsMobile = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
   return isMobile;
+};
+
+const DEFAULT_GUITAR: GuitarProfile = {
+  id: 'default',
+  name: 'Classical Guitar',
+  tuningName: 'Standard (EADGBE)',
+  tuning: [...STANDARD_TUNING_OFFSETS]
 };
 
 const App: React.FC = () => {
@@ -33,11 +40,19 @@ const App: React.FC = () => {
   const [activePowerup, setActivePowerup] = useState<PowerupState | null>(null);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   
+  // Guitar Config State
+  const [guitarProfiles, setGuitarProfiles] = useState<GuitarProfile[]>([DEFAULT_GUITAR]);
+  const [activeGuitarId, setActiveGuitarId] = useState<string>('default');
+  const [showGuitarSettings, setShowGuitarSettings] = useState<boolean>(false);
+
   // New state for blocking input and visual feedback
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   
   const isMobile = useIsMobile();
+
+  // Active Guitar Derived State
+  const activeGuitar = guitarProfiles.find(p => p.id === activeGuitarId) || DEFAULT_GUITAR;
 
   // Game Configuration State
   const [gameConfig, setGameConfig] = useState<GameConfig>({
@@ -82,11 +97,12 @@ const App: React.FC = () => {
     }
   }, [gameState]);
 
+  // Load persistence
   useEffect(() => {
-    const saved = localStorage.getItem('fretmaster_history');
-    if (saved) {
+    const savedHistory = localStorage.getItem('fretmaster_history');
+    if (savedHistory) {
       try {
-        const parsedHistory = JSON.parse(saved);
+        const parsedHistory = JSON.parse(savedHistory);
         setHistory(parsedHistory);
         if (parsedHistory.length > 0) {
           const lastGame = parsedHistory[parsedHistory.length - 1];
@@ -94,14 +110,37 @@ const App: React.FC = () => {
           setGameConfig(prev => ({
             ...prev,
             startingFret: smartStart,
-            maxFretCap: TOTAL_FRETS // Reset cap to ensure progression isn't blocked by old data
+            maxFretCap: TOTAL_FRETS 
           }));
         }
       } catch (e) {
         console.error("Failed to parse history", e);
       }
     }
+
+    const savedGuitars = localStorage.getItem('fretmaster_guitars');
+    if (savedGuitars) {
+      try {
+         const parsedGuitars = JSON.parse(savedGuitars);
+         if (Array.isArray(parsedGuitars) && parsedGuitars.length > 0) {
+           setGuitarProfiles(parsedGuitars);
+         }
+      } catch (e) { console.error("Failed to parse guitars", e); }
+    }
+
+    const savedActiveGuitarId = localStorage.getItem('fretmaster_active_guitar');
+    if (savedActiveGuitarId) {
+       setActiveGuitarId(savedActiveGuitarId);
+    }
+
   }, []);
+
+  const saveGuitars = (profiles: GuitarProfile[], activeId: string) => {
+     setGuitarProfiles(profiles);
+     setActiveGuitarId(activeId);
+     localStorage.setItem('fretmaster_guitars', JSON.stringify(profiles));
+     localStorage.setItem('fretmaster_active_guitar', activeId);
+  };
 
   const cleanupTimers = () => {
     if (timerIntervalRef.current) {
@@ -135,12 +174,12 @@ const App: React.FC = () => {
         };
       } else if (roll < 0.66) {
         const strIdx = Math.floor(Math.random() * 6);
-        const strName = OPEN_STRING_NOTES[strIdx];
+        // Note: Using 'String X' instead of note name here as note name depends on tuning now
         newPowerup = {
           type: PowerupType.REVEAL_NATURALS_STRING,
           value: strIdx,
           duration: duration,
-          label: `Natural Notes on ${strName} String Revealed!`
+          label: `Natural Notes on String ${strIdx + 1} Revealed!`
         };
       } else {
         const fret = Math.floor(Math.random() * currentMaxFret) + 1;
@@ -165,10 +204,14 @@ const App: React.FC = () => {
     const scaleNotes = gameConfig.focusMode === FocusMode.KEY && gameConfig.keyRoot && gameConfig.keyScale
       ? getScaleNotes(gameConfig.keyRoot, gameConfig.keyScale)
       : [];
+    
+    // Use active guitar tuning
+    const offsets = activeGuitar.tuning;
 
     for (let s = 0; s < 6; s++) {
       for (let f = 0; f <= currentMaxFret; f++) {
-        const name = getNoteAtPosition(s, f);
+        // Dynamic note calculation based on tuning
+        const name = getNoteAtPosition(offsets[s], f);
         
         let isValid = true;
         if (gameConfig.focusMode === FocusMode.NATURALS) {
@@ -183,7 +226,7 @@ const App: React.FC = () => {
       }
     }
     return validNotes;
-  }, [currentMaxFret, gameConfig]);
+  }, [currentMaxFret, gameConfig, activeGuitar]);
 
   const generateNewNote = useCallback(() => {
     if (gameStateRef.current !== GameState.PLAYING) return;
@@ -434,31 +477,25 @@ const App: React.FC = () => {
     setStudyConfig(prev => ({ ...prev, scaleType: type }));
   };
 
-  // Toggle Chord Handler
   const toggleChord = (root: string, type: 'MAJOR' | 'NATURAL_MINOR') => {
     setStudyConfig(prev => {
-      // Find if there is already an active chord for this root
       const existingChordIndex = prev.activeChords.findIndex(c => c.root === root);
       let newChords = [...prev.activeChords];
 
       if (existingChordIndex >= 0) {
         const existingChord = newChords[existingChordIndex];
-        // If clicking the same button, remove it (toggle off)
         if (existingChord.type === type) {
           newChords.splice(existingChordIndex, 1);
         } else {
-          // If clicking different button (e.g. was Major, clicked Minor), switch it
           newChords[existingChordIndex] = { root, type };
         }
       } else {
-        // No chord for this root, add it
         newChords.push({ root, type });
       }
       return { ...prev, activeChords: newChords };
     });
   };
   
-  // Calculate Visible Notes for Study Mode
   const getActiveScaleNotes = () => studyConfig.rootNote && studyConfig.scaleType ? getScaleNotes(studyConfig.rootNote, studyConfig.scaleType) : [];
   
   const getActiveChordNotes = () => {
@@ -471,30 +508,73 @@ const App: React.FC = () => {
     const scale = getActiveScaleNotes();
     const chord = getActiveChordNotes();
     const manual = studyConfig.manuallySelectedNotes;
-    // Combine all unique notes
     return Array.from(new Set([...scale, ...chord, ...manual]));
   };
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-900 text-white overflow-hidden select-none">
+      {/* Settings Modal */}
+      {showGuitarSettings && (
+        <GuitarSettings
+          profiles={guitarProfiles}
+          activeProfileId={activeGuitarId}
+          onProfileChange={(id) => saveGuitars(guitarProfiles, id)}
+          onProfileUpdate={(updated) => {
+             const newProfiles = guitarProfiles.map(p => p.id === updated.id ? updated : p);
+             saveGuitars(newProfiles, activeGuitarId);
+          }}
+          onProfileCreate={(newProfile) => {
+             const newProfiles = [...guitarProfiles, newProfile];
+             saveGuitars(newProfiles, activeGuitarId);
+          }}
+          onClose={() => setShowGuitarSettings(false)}
+        />
+      )}
+
       {/* Header */}
-      <header className="flex-none p-4 bg-gray-800 border-b border-gray-700 shadow-md flex justify-between items-center z-30">
-        <h1 className="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-orange-500 cursor-pointer" onClick={() => setGameState(GameState.MENU)}>
-          Frétude
-        </h1>
-        <div className="flex items-center gap-4">
+      <header className="flex-none h-16 px-4 bg-gray-800 border-b border-gray-700 shadow-md flex items-center justify-between z-30 relative">
+        {/* Left: Logo */}
+        <div className="w-1/3 flex justify-start">
+          <h1 className="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-orange-500 cursor-pointer" onClick={() => setGameState(GameState.MENU)}>
+            Frétude
+          </h1>
+        </div>
+
+        {/* Center: Contextual Info */}
+        <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex justify-center items-center pointer-events-none w-full md:w-auto">
            {gameState === GameState.STUDY && (
-              <span className="px-3 py-1 bg-blue-900 text-blue-200 rounded-full font-bold text-xs uppercase tracking-wider border border-blue-700 shadow-sm">Study Mode</span>
+              <span className="px-4 py-1.5 bg-blue-900/80 text-blue-200 rounded-full font-bold text-xs uppercase tracking-wider border border-blue-700/50 shadow-sm backdrop-blur-sm">Study Mode</span>
            )}
            {gameState === GameState.PLAYING && (
-              <div className="flex flex-col items-end">
-                <span className="text-xs text-gray-400 font-mono">Streak</span>
-                <span className={`font-bold text-lg ${streak >= 5 ? 'text-amber-400 animate-pulse' : 'text-white'}`}>{streak} 🔥</span>
+              <div className="flex flex-col items-center pointer-events-auto">
+                <div className="flex items-center gap-2 bg-gray-900/50 px-3 py-1 rounded-full border border-gray-700/50 backdrop-blur-sm">
+                   <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Streak</span>
+                   <span className={`font-bold text-sm ${streak >= 5 ? 'text-amber-400 animate-pulse' : 'text-white'}`}>{streak} 🔥</span>
+                </div>
+                <div className="text-[10px] text-gray-500 font-mono mt-0.5 hidden md:block">
+                   Range: 0-{currentMaxFret} • {gameConfig.focusMode === FocusMode.KEY ? `${gameConfig.keyRoot} ${gameConfig.keyScale}` : gameConfig.focusMode === FocusMode.NATURALS ? 'Naturals' : 'Chromatic'}
+                </div>
               </div>
            )}
-           <div className="text-sm text-gray-500 hidden md:block">
-            {gameState === GameState.PLAYING ? <span className="font-mono">Range: 0-{currentMaxFret} • {gameConfig.focusMode === FocusMode.KEY ? `${gameConfig.keyRoot} ${gameConfig.keyScale}` : gameConfig.focusMode}</span> : gameState !== GameState.STUDY && <span>Classical Guitar • EADGBE</span>}
-          </div>
+        </div>
+
+        {/* Right: Guitar Config */}
+        <div className="w-1/3 flex justify-end">
+          <button 
+            onClick={() => setShowGuitarSettings(true)}
+            className="flex items-center gap-3 hover:bg-gray-700/50 px-2 py-1.5 rounded-lg transition-colors group"
+          >
+            <div className="flex flex-col items-end hidden md:flex">
+              <span className="text-xs font-bold text-gray-300 group-hover:text-white transition-colors">{activeGuitar.name}</span>
+              <span className="text-[10px] text-gray-500 group-hover:text-gray-400 transition-colors">{activeGuitar.tuningName}</span>
+            </div>
+            <div className="w-8 h-8 rounded-full bg-gray-700 group-hover:bg-blue-600/20 flex items-center justify-center border border-gray-600 group-hover:border-blue-500/50 transition-colors">
+               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 group-hover:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+               </svg>
+            </div>
+          </button>
         </div>
       </header>
 
@@ -615,6 +695,7 @@ const App: React.FC = () => {
                     onClearSelection={() => setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })}
                     onBackToMenu={() => { setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] }); setGameState(GameState.MENU); }}
                     orientation={isMobile ? 'vertical' : 'horizontal'}
+                    tuningOffsets={activeGuitar.tuning}
                  />
                </div>
             </div>
@@ -665,6 +746,7 @@ const App: React.FC = () => {
                         orientation={isMobile ? 'vertical' : 'horizontal'}
                         rootNote={gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null}
                         scaleType={gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null}
+                        tuningOffsets={activeGuitar.tuning}
                     />
                  </div>
                </div>
@@ -724,7 +806,8 @@ const App: React.FC = () => {
                <p className="text-gray-400 mb-8">
                  Difficulty: <span className="text-white font-bold">{difficulty}</span> <br/>
                  Max Fret Reached: <span className="text-white font-bold">{currentMaxFret}</span> <br/>
-                 Focus: <span className="text-white font-bold">{gameConfig.focusMode}</span>
+                 Focus: <span className="text-white font-bold">{gameConfig.focusMode}</span> <br />
+                 Guitar: <span className="text-blue-400 font-bold">{activeGuitar.name}</span>
                </p>
                <div className="flex gap-4 justify-center">
                  <button onClick={() => setGameState(GameState.MENU)} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors">Main Menu</button>

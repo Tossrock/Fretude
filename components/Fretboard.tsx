@@ -1,8 +1,7 @@
 
-
 import React, { useState } from 'react';
 import { Note, PowerupState, PowerupType, ScaleType } from '../types';
-import { getNoteAtPosition, getNoteColor, getNoteHue, NOTES_SHARP, getDisplayNoteName } from '../constants';
+import { getNoteAtPosition, getNoteColor, getNoteHue, NOTES_SHARP, getDisplayNoteName, STANDARD_TUNING_OFFSETS } from '../constants';
 
 interface FretboardProps {
   activeNote: Note | null;
@@ -28,7 +27,10 @@ interface FretboardProps {
   onBackToMenu?: () => void;
   
   isStudyMode?: boolean;
-  orientation?: 'horizontal' | 'vertical'; 
+  orientation?: 'horizontal' | 'vertical';
+  
+  // Tuning
+  tuningOffsets?: number[]; // Array of offsets relative to E2
 }
 
 const Fretboard: React.FC<FretboardProps> = ({ 
@@ -50,7 +52,8 @@ const Fretboard: React.FC<FretboardProps> = ({
   onClearSelection,
   onBackToMenu,
   isStudyMode = false,
-  orientation = 'horizontal'
+  orientation = 'horizontal',
+  tuningOffsets = STANDARD_TUNING_OFFSETS
 }) => {
   const isVertical = orientation === 'vertical';
   const [showAdvancedScales, setShowAdvancedScales] = useState(false);
@@ -85,7 +88,8 @@ const Fretboard: React.FC<FretboardProps> = ({
   };
 
   const getDisplayedNote = (stringIdx: number, fretIdx: number): string | null => {
-    const noteName = getNoteAtPosition(stringIdx, fretIdx);
+    const offset = tuningOffsets[stringIdx];
+    const noteName = getNoteAtPosition(offset, fretIdx);
 
     // Study Mode Logic
     if (isStudyMode && highlightNotes && highlightLocations) {
@@ -122,6 +126,7 @@ const Fretboard: React.FC<FretboardProps> = ({
   const renderNoteContent = (stringIdx: number, fretIdx: number) => {
     const revealedNote = getDisplayedNote(stringIdx, fretIdx);
     const isActive = activeNote?.fretIndex === fretIdx && activeNote?.stringIndex === stringIdx;
+    const tuningOffset = tuningOffsets[stringIdx];
     
     // Determine display name (accidental handling)
     const displayNote = revealedNote 
@@ -147,7 +152,7 @@ const Fretboard: React.FC<FretboardProps> = ({
             className={`
               ${dotSize} rounded-full flex items-center justify-center ${fontSize} font-bold text-black shadow-md animate-fade-in transition-all border border-white/20
             `}
-            style={{ backgroundColor: getNoteColor(revealedNote!, stringIdx, fretIdx) }}
+            style={{ backgroundColor: getNoteColor(revealedNote!, tuningOffset, fretIdx) }}
           >
             {displayNote}
           </div>
