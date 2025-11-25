@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig } from './types';
 import { NOTES_SHARP, NATURAL_NOTES, OPEN_STRING_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes } from './constants';
@@ -52,7 +51,7 @@ const App: React.FC = () => {
   // Study Mode State
   const [studyConfig, setStudyConfig] = useState<StudyConfig>({
     rootNote: null,
-    chordRoot: null,
+    activeChords: [],
     scaleType: null,
     manuallySelectedNotes: [],
     activeStrings: [],
@@ -298,7 +297,7 @@ const App: React.FC = () => {
     const correctNote = targetNoteRef.current?.noteName || '?';
     const displayCorrect = getDisplayNoteName(correctNote, 
       gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
-      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+      (gameConfig.focusMode === FocusMode.KEY && (gameConfig.keyScale === 'MAJOR' || gameConfig.keyScale === 'NATURAL_MINOR')) ? gameConfig.keyScale : null
     );
 
     setFeedback({ status: 'incorrect', message: `Time up! It was ${displayCorrect}` });
@@ -368,7 +367,7 @@ const App: React.FC = () => {
         const newHealth = prev - 1;
         const correctDisplay = getDisplayNoteName(targetNote.noteName, 
            gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
-           gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+           (gameConfig.focusMode === FocusMode.KEY && (gameConfig.keyScale === 'MAJOR' || gameConfig.keyScale === 'NATURAL_MINOR')) ? gameConfig.keyScale : null
         );
         setFeedback({ status: 'incorrect', message: `Wrong! It was ${correctDisplay}` });
         
@@ -430,16 +429,42 @@ const App: React.FC = () => {
   const handleRootNoteSelect = (note: string | null) => {
     setStudyConfig(prev => ({ ...prev, rootNote: note, scaleType: note && !prev.scaleType ? 'MAJOR' : prev.scaleType }));
   };
-  const handleChordRootSelect = (note: string | null) => {
-    setStudyConfig(prev => ({ ...prev, chordRoot: note, scaleType: note && !prev.scaleType ? 'MAJOR' : prev.scaleType }));
-  };
   const handleScaleTypeSelect = (type: ScaleType) => {
     setStudyConfig(prev => ({ ...prev, scaleType: type }));
+  };
+
+  // Toggle Chord Handler
+  const toggleChord = (root: string, type: 'MAJOR' | 'NATURAL_MINOR') => {
+    setStudyConfig(prev => {
+      // Find if there is already an active chord for this root
+      const existingChordIndex = prev.activeChords.findIndex(c => c.root === root);
+      let newChords = [...prev.activeChords];
+
+      if (existingChordIndex >= 0) {
+        const existingChord = newChords[existingChordIndex];
+        // If clicking the same button, remove it (toggle off)
+        if (existingChord.type === type) {
+          newChords.splice(existingChordIndex, 1);
+        } else {
+          // If clicking different button (e.g. was Major, clicked Minor), switch it
+          newChords[existingChordIndex] = { root, type };
+        }
+      } else {
+        // No chord for this root, add it
+        newChords.push({ root, type });
+      }
+      return { ...prev, activeChords: newChords };
+    });
   };
   
   // Calculate Visible Notes for Study Mode
   const getActiveScaleNotes = () => studyConfig.rootNote && studyConfig.scaleType ? getScaleNotes(studyConfig.rootNote, studyConfig.scaleType) : [];
-  const getActiveChordNotes = () => studyConfig.chordRoot && studyConfig.scaleType ? getChordNotes(studyConfig.chordRoot, studyConfig.scaleType) : [];
+  
+  const getActiveChordNotes = () => {
+    return studyConfig.activeChords.flatMap(chord => 
+      getChordNotes(chord.root, chord.type)
+    );
+  };
   
   const getVisibleNotesForStudy = () => {
     const scale = getActiveScaleNotes();
@@ -457,6 +482,9 @@ const App: React.FC = () => {
           Frétude
         </h1>
         <div className="flex items-center gap-4">
+           {gameState === GameState.STUDY && (
+              <span className="px-3 py-1 bg-blue-900 text-blue-200 rounded-full font-bold text-xs uppercase tracking-wider border border-blue-700 shadow-sm">Study Mode</span>
+           )}
            {gameState === GameState.PLAYING && (
               <div className="flex flex-col items-end">
                 <span className="text-xs text-gray-400 font-mono">Streak</span>
@@ -464,7 +492,7 @@ const App: React.FC = () => {
               </div>
            )}
            <div className="text-sm text-gray-500 hidden md:block">
-            {gameState === GameState.STUDY ? <span className="font-mono text-blue-400">Study Mode</span> : gameState === GameState.PLAYING ? <span className="font-mono">Range: 0-{currentMaxFret} • {gameConfig.focusMode === FocusMode.KEY ? `${gameConfig.keyRoot} ${gameConfig.keyScale}` : gameConfig.focusMode}</span> : <span>Classical Guitar • EADGBE</span>}
+            {gameState === GameState.PLAYING ? <span className="font-mono">Range: 0-{currentMaxFret} • {gameConfig.focusMode === FocusMode.KEY ? `${gameConfig.keyRoot} ${gameConfig.keyScale}` : gameConfig.focusMode}</span> : gameState !== GameState.STUDY && <span>Classical Guitar • EADGBE</span>}
           </div>
         </div>
       </header>
@@ -482,7 +510,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex flex-col md:flex-row gap-4 w-full max-w-lg">
                   <button onClick={startGame} className="flex-1 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl font-bold text-lg shadow-xl shadow-blue-900/20 transition-all transform hover:-translate-y-1">Start Game</button>
-                  <button onClick={() => setStudyConfig({ rootNote: null, chordRoot: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} onClickCapture={() => setGameState(GameState.STUDY)} className="px-6 py-4 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold transition-all border border-gray-600">Study Mode</button>
+                  <button onClick={() => setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} onClickCapture={() => setGameState(GameState.STUDY)} className="px-6 py-4 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold transition-all border border-gray-600">Study Mode</button>
               </div>
               
               <div className="w-full max-w-3xl">
@@ -561,18 +589,11 @@ const App: React.FC = () => {
 
         {/* STUDY MODE SCREEN */}
         {gameState === GameState.STUDY && (
-           <div className="flex flex-col items-center h-full pt-4 px-2 overflow-hidden">
-             <div className="flex-none w-full max-w-6xl bg-gray-800 rounded-xl p-4 mb-4 shadow-lg border border-gray-700">
-                <div className="flex flex-wrap justify-between items-center gap-4">
-                  <h2 className="text-xl font-bold text-blue-400">Fretboard Explorer</h2>
-                  <div className="flex gap-2">
-                    <button onClick={() => setStudyConfig({ rootNote: null, chordRoot: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} className="px-3 py-1 bg-red-900/50 text-red-300 rounded text-xs hover:bg-red-900">Clear All</button>
-                    <button onClick={() => { setStudyConfig({ rootNote: null, chordRoot: null, scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] }); setGameState(GameState.MENU); }} className="px-4 py-2 bg-gray-700 rounded text-sm hover:bg-gray-600">Back to Menu</button>
-                  </div>
-                </div>
-             </div>
-             <div className="flex-1 w-full flex justify-center pb-6 overflow-hidden">
-               <div className="h-full w-full max-w-7xl px-2 md:px-4">
+           <div className="flex flex-col items-center h-full overflow-hidden">
+             
+             {/* Main Content (Fretboard + Sidebar) */}
+             <div className="flex-1 w-full flex justify-center pb-2 pt-4 px-2 md:px-4 min-h-0">
+               <div className="h-full w-full max-w-7xl">
                  <Fretboard 
                     isStudyMode={true}
                     activeNote={null} 
@@ -582,14 +603,16 @@ const App: React.FC = () => {
                     scaleNotes={getActiveScaleNotes()}
                     highlightLocations={{ strings: studyConfig.activeStrings, frets: studyConfig.activeFrets }}
                     rootNote={studyConfig.rootNote}
-                    chordRoot={studyConfig.chordRoot}
+                    activeChords={studyConfig.activeChords}
                     scaleType={studyConfig.scaleType}
                     onNoteNameToggle={toggleStudyNote}
                     onStringToggle={toggleStudyString}
                     onFretToggle={toggleStudyFret}
                     onRootNoteSelect={handleRootNoteSelect}
-                    onChordRootSelect={handleChordRootSelect}
+                    onChordToggle={toggleChord}
                     onScaleTypeSelect={handleScaleTypeSelect}
+                    onClearSelection={() => setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })}
+                    onBackToMenu={() => { setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] }); setGameState(GameState.MENU); }}
                     orientation={isMobile ? 'vertical' : 'horizontal'}
                  />
                </div>
@@ -658,7 +681,7 @@ const App: React.FC = () => {
                       const displayNote = getDisplayNoteName(
                          note, 
                          gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null, 
-                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null
+                         (gameConfig.focusMode === FocusMode.KEY && (gameConfig.keyScale === 'MAJOR' || gameConfig.keyScale === 'NATURAL_MINOR')) ? gameConfig.keyScale : null
                       );
                       
                       const isSelected = note === selectedAnswer;

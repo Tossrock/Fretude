@@ -59,11 +59,19 @@ export interface PowerupState {
   label: string;
 }
 
-export type ScaleType = 'MAJOR' | 'NATURAL_MINOR' | null;
+export type ScaleType = 
+  | 'MAJOR' 
+  | 'NATURAL_MINOR' 
+  | 'DORIAN' 
+  | 'PHRYGIAN' 
+  | 'LYDIAN' 
+  | 'MIXOLYDIAN' 
+  | 'LOCRIAN' 
+  | null;
 
 export interface StudyConfig {
   rootNote: string | null;
-  chordRoot: string | null; // Added for Chord Mode
+  activeChords: { root: string; type: 'MAJOR' | 'NATURAL_MINOR' }[]; // Changed to support multiple chords
   scaleType: ScaleType;
   manuallySelectedNotes: string[]; // Note names e.g. "C", "F#"
   activeStrings: number[]; // Indices 0-5

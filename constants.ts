@@ -97,14 +97,19 @@ export const getNoteColor = (noteName: string, stringIndex: number, fretIndex: n
 // Intervals (semitones)
 const SCALE_INTERVALS = {
   MAJOR: [0, 2, 4, 5, 7, 9, 11],
-  NATURAL_MINOR: [0, 2, 3, 5, 7, 8, 10]
+  NATURAL_MINOR: [0, 2, 3, 5, 7, 8, 10],
+  DORIAN: [0, 2, 3, 5, 7, 9, 10],
+  PHRYGIAN: [0, 1, 3, 5, 7, 8, 10],
+  LYDIAN: [0, 2, 4, 6, 7, 9, 11],
+  MIXOLYDIAN: [0, 2, 4, 5, 7, 9, 10],
+  LOCRIAN: [0, 1, 3, 5, 6, 8, 10]
 };
 
-export const getScaleNotes = (root: string, type: 'MAJOR' | 'NATURAL_MINOR'): string[] => {
+export const getScaleNotes = (root: string, type: 'MAJOR' | 'NATURAL_MINOR' | 'DORIAN' | 'PHRYGIAN' | 'LYDIAN' | 'MIXOLYDIAN' | 'LOCRIAN'): string[] => {
   const rootIndex = NOTES_SHARP.indexOf(root);
   if (rootIndex === -1) return [];
 
-  const intervals = SCALE_INTERVALS[type];
+  const intervals = SCALE_INTERVALS[type] || SCALE_INTERVALS.MAJOR;
   return intervals.map(interval => {
     const noteIndex = (rootIndex + interval) % 12;
     return NOTES_SHARP[noteIndex];
