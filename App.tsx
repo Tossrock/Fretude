@@ -586,7 +586,7 @@ const App: React.FC = () => {
       )}
 
       {/* Header */}
-      <header className="flex-none h-16 px-4 bg-gray-800 border-b border-gray-700 shadow-md flex items-center justify-between z-30 relative">
+      <header className="flex-none h-16 px-4 bg-gray-800 border-b border-gray-700 shadow-md flex items-center justify-between z-30 relative isolate">
         {/* Left: Logo */}
         <div className="w-1/3 flex justify-start">
           <h1 className="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-amber-400 to-orange-500 cursor-pointer" onClick={() => setGameState(GameState.MENU)}>
@@ -595,13 +595,13 @@ const App: React.FC = () => {
         </div>
 
         {/* Center: Contextual Info */}
-        <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex justify-center items-center pointer-events-none w-full md:w-auto">
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex justify-center items-center pointer-events-none w-full md:w-auto">
            {gameState === GameState.STUDY && (
-              <span className="px-4 py-1.5 bg-blue-900/80 text-blue-200 rounded-full font-bold text-xs uppercase tracking-wider border border-blue-700/50 shadow-sm backdrop-blur-sm">Study Mode</span>
+              <span className="px-4 py-1.5 bg-blue-900 text-blue-200 rounded-full font-bold text-xs uppercase tracking-wider border border-blue-700/50 shadow-sm">Study Mode</span>
            )}
            {gameState === GameState.PLAYING && (
               <div className="flex flex-col items-center pointer-events-auto">
-                <div className="flex items-center gap-2 bg-gray-900/50 px-3 py-1 rounded-full border border-gray-700/50 backdrop-blur-sm">
+                <div className="flex items-center gap-2 bg-gray-900 px-3 py-1 rounded-full border border-gray-700/50">
                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Streak</span>
                    <span className={`font-bold text-sm ${streak >= 5 ? 'text-amber-400 animate-pulse' : 'text-white'}`}>{streak} 🔥</span>
                 </div>
@@ -633,7 +633,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col relative overflow-hidden">
+      <main className="flex-1 flex flex-col relative overflow-hidden isolate">
         
         {/* MENU SCREEN */}
         {gameState === GameState.MENU && (
