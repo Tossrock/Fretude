@@ -142,7 +142,7 @@ const Fretboard: React.FC<FretboardProps> = ({
     return (
       <div className="relative z-20 flex items-center justify-center">
         {isActive && (
-          <div className={`${dotSize} rounded-full bg-blue-500 border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-bounce z-30 flex items-center justify-center`}>
+          <div className={`${dotSize} rounded-full bg-blue-500 border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-pulse z-30 flex items-center justify-center`}>
             {displayNote && (
               <span className={`${fontSize} font-bold text-white drop-shadow-md`}>{displayNote}</span>
             )}
@@ -150,9 +150,9 @@ const Fretboard: React.FC<FretboardProps> = ({
         )}
         
         {displayNote && !isActive && (
-          <div 
+          <div
             className={`
-              ${dotSize} rounded-full flex items-center justify-center ${fontSize} font-bold text-black shadow-md animate-fade-in transition-all border border-white/20
+              ${dotSize} rounded-full flex items-center justify-center ${fontSize} font-bold text-black shadow-md border border-white/20
             `}
             style={{ backgroundColor: getNoteColor(revealedNote!, tuningOffset, fretIdx) }}
           >

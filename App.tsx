@@ -785,7 +785,7 @@ const App: React.FC = () => {
                  <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden sm:inline">HP</span>
                  <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full border border-gray-700 relative">
                     <div
-                      className={`h-full rounded-full transition-[width] duration-300 ease-out ${getHealthColorClass(health, MAX_HEALTH)}`}
+                      className={`h-full rounded-full transition-[width,background-color] duration-300 ease-out ${getHealthColorClass(health, MAX_HEALTH)}`}
                       style={{ width: `${(health / MAX_HEALTH) * 100}%` }}
                     />
                  </div>
@@ -793,7 +793,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Powerup Banner - Fixed Height */}
-            <div className={`flex-none w-full max-w-4xl h-8 mb-2 flex items-center justify-center transition-all duration-500 ${activePowerup ? 'opacity-100 transform translate-y-0' : 'opacity-0 transform -translate-y-4'}`}>
+            <div className="flex-none w-full max-w-4xl h-8 mb-2 flex items-center justify-center">
               {activePowerup && (
                  <div className="px-6 py-1 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full shadow-[0_0_20px_rgba(147,51,234,0.5)] border border-purple-400 flex items-center gap-2 animate-pulse">
                    <span className="text-xl">⚡</span>
