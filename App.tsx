@@ -26,9 +26,9 @@ const DEFAULT_GUITAR: GuitarProfile = {
 
 const getHealthColorClass = (current: number, max: number) => {
   const percentage = (current / max) * 100;
-  if (percentage > 60) return 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]';
-  if (percentage > 20) return 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]';
-  return 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]';
+  if (percentage > 60) return 'bg-green-500';
+  if (percentage > 20) return 'bg-amber-500';
+  return 'bg-red-500';
 };
 
 const App: React.FC = () => {
@@ -783,10 +783,10 @@ const App: React.FC = () => {
               {/* Right: Health Bar */}
               <div className="flex justify-end items-center gap-2 w-1/3">
                  <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden sm:inline">HP</span>
-                 <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full overflow-hidden border border-gray-700 shadow-inner relative">
+                 <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full overflow-hidden border border-gray-700 shadow-inner relative" style={{ transform: 'translateZ(0)' }}>
                     <div 
-                      className={`h-full transition-all duration-300 ease-out ${getHealthColorClass(health, MAX_HEALTH)}`} 
-                      style={{ width: `${(health / MAX_HEALTH) * 100}%` }} 
+                      className={`h-full transition-transform duration-300 ease-out origin-left ${getHealthColorClass(health, MAX_HEALTH)}`} 
+                      style={{ transform: `scaleX(${health / MAX_HEALTH})` }} 
                     />
                  </div>
               </div>
@@ -803,8 +803,11 @@ const App: React.FC = () => {
             </div>
 
             {/* Timer Bar - Fixed Height */}
-            <div className="flex-none w-full max-w-4xl h-2 bg-gray-800 rounded-full mb-4 overflow-hidden">
-               <div className={`h-full transition-all duration-100 ease-linear ${timer < 30 ? 'bg-red-500' : 'bg-blue-500'}`} style={{ width: `${timer}%` }} />
+            <div className="flex-none w-full max-w-4xl h-2 bg-gray-800 rounded-full mb-4 overflow-hidden" style={{ transform: 'translateZ(0)' }}>
+               <div 
+                  className={`h-full transition-transform duration-100 ease-linear origin-left will-change-transform ${timer < 30 ? 'bg-red-500' : 'bg-blue-500'}`} 
+                  style={{ transform: `scaleX(${timer / 100})` }} 
+               />
             </div>
 
             {/* Game Board + Controls Container */}
