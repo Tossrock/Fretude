@@ -24,6 +24,13 @@ const DEFAULT_GUITAR: GuitarProfile = {
   tuning: [...STANDARD_TUNING_OFFSETS]
 };
 
+const getHealthColorClass = (current: number, max: number) => {
+  const percentage = (current / max) * 100;
+  if (percentage > 60) return 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]';
+  if (percentage > 20) return 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]';
+  return 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]';
+};
+
 const App: React.FC = () => {
   // --- State ---
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
@@ -755,15 +762,33 @@ const App: React.FC = () => {
           <div className="flex flex-col items-center h-full justify-start pt-4 md:pt-10 px-2 overflow-hidden">
             
             {/* Top Stats Area - Fixed Height */}
-            <div className="flex-none w-full max-w-4xl flex justify-between items-center mb-4 px-4">
-              <div className="flex items-center gap-2">
-                 <span className="text-gray-400 uppercase text-xs font-bold tracking-wider">Score</span>
+            <div className="flex-none w-full max-w-4xl flex justify-between items-center mb-2 px-4 gap-4">
+              {/* Left: Score */}
+              <div className="flex items-center gap-2 w-1/3">
+                 <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden xs:inline">Score</span>
                  <span className="text-3xl font-mono text-amber-400">{score}</span>
               </div>
-              <div className="flex gap-1">
-                {Array.from({ length: MAX_HEALTH }).map((_, i) => (
-                  <div key={i} className={`w-4 h-4 md:w-6 md:h-6 rounded-full transition-colors duration-300 ${i < health ? 'bg-red-500' : 'bg-gray-800'}`} />
-                ))}
+
+              {/* Center: Finish Button (Moved here) */}
+              <div className="flex justify-center w-1/3">
+                <button
+                    onClick={stopGame}
+                    disabled={isProcessing}
+                    className="px-4 py-1.5 rounded-lg border border-gray-700 bg-gray-800 text-gray-400 font-bold text-xs uppercase tracking-wider hover:text-white hover:border-gray-500 hover:bg-gray-700 transition-all shadow-sm"
+                >
+                    Finish
+                </button>
+              </div>
+
+              {/* Right: Health Bar */}
+              <div className="flex justify-end items-center gap-2 w-1/3">
+                 <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden sm:inline">HP</span>
+                 <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full overflow-hidden border border-gray-700 shadow-inner relative">
+                    <div 
+                      className={`h-full transition-all duration-300 ease-out ${getHealthColorClass(health, MAX_HEALTH)}`} 
+                      style={{ width: `${(health / MAX_HEALTH) * 100}%` }} 
+                    />
+                 </div>
               </div>
             </div>
 
@@ -841,15 +866,6 @@ const App: React.FC = () => {
                         </button>
                       );
                     })}
-                    
-                    {/* Finish Button */}
-                    <button
-                        onClick={stopGame}
-                        disabled={isProcessing}
-                        className="min-w-[3.5rem] w-14 md:w-20 py-3 rounded-lg border-2 border-gray-700 text-gray-500 font-bold text-sm md:text-base hover:text-white hover:border-gray-500 transition-colors flex items-center justify-center opacity-80"
-                    >
-                        Finish
-                    </button>
                   </div>
                </div>
             </div>
