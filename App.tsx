@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle } from './types';
+import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle, NoteStatsMap, NoteStat, HeatmapMetric } from './types';
 import { NOTES_SHARP, NATURAL_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes, STANDARD_TUNING_OFFSETS } from './constants';
 import Fretboard from './components/Fretboard';
 import StatsChart from './components/StatsChart';
@@ -53,6 +53,13 @@ const App: React.FC = () => {
   const [showGuitarSettings, setShowGuitarSettings] = useState<boolean>(false);
   const [accidentalPreference, setAccidentalPreference] = useState<AccidentalStyle>('SHARP');
 
+  // Study Config State
+  const [studyMaxFret, setStudyMaxFret] = useState<number>(12);
+
+  // Stats / Adaptive State
+  const [noteStats, setNoteStats] = useState<NoteStatsMap>({});
+  const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>(HeatmapMetric.SPEED);
+
   // New state for blocking input and visual feedback
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -69,7 +76,8 @@ const App: React.FC = () => {
     keyScale: 'MAJOR',
     startingFret: INITIAL_MAX_FRET,
     maxFretCap: TOTAL_FRETS,
-    timeLimit: 10
+    timeLimit: 10,
+    adaptiveLearning: true
   });
 
   // Study Mode State
@@ -89,6 +97,7 @@ const App: React.FC = () => {
   const activePowerupRef = useRef<PowerupState | null>(null);
   const targetNoteRef = useRef<Note | null>(null);
   const gameStateRef = useRef<GameState>(GameState.MENU);
+  const noteStartTimeRef = useRef<number>(0);
 
   useEffect(() => {
     activePowerupRef.current = activePowerup;
@@ -145,6 +154,20 @@ const App: React.FC = () => {
     if (savedAccidentalPref === 'FLAT' || savedAccidentalPref === 'SHARP') {
       setAccidentalPreference(savedAccidentalPref as AccidentalStyle);
     }
+    
+    // Load Note Stats
+    const savedStats = localStorage.getItem('fretmaster_note_stats');
+    if (savedStats) {
+       try {
+         setNoteStats(JSON.parse(savedStats));
+       } catch (e) { console.error("Failed to parse stats", e); }
+    }
+    
+    // Load Config preferences
+    const savedAdaptive = localStorage.getItem('fretmaster_adaptive_learning');
+    if (savedAdaptive !== null) {
+      setGameConfig(prev => ({ ...prev, adaptiveLearning: savedAdaptive === 'true' }));
+    }
 
   }, []);
 
@@ -160,6 +183,11 @@ const App: React.FC = () => {
     localStorage.setItem('fretmaster_accidental_pref', pref);
   };
 
+  const saveNoteStats = (stats: NoteStatsMap) => {
+    setNoteStats(stats);
+    localStorage.setItem('fretmaster_note_stats', JSON.stringify(stats));
+  };
+
   const cleanupTimers = () => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -170,6 +198,156 @@ const App: React.FC = () => {
       feedbackTimeoutRef.current = null;
     }
   };
+
+  // --- STATS & ALGORITHM LOGIC ---
+
+  const recordNoteResult = (note: Note, isCorrect: boolean, timeTaken: number, isTimeout: boolean = false) => {
+     const tuningId = activeGuitar.tuningName; // Use Name or ID to differentiate if tuning changes
+     const key = `${tuningId}-${note.stringIndex}-${note.fretIndex}`;
+     
+     const currentStat = noteStats[key] || {
+       correct: 0,
+       incorrect: 0,
+       timeouts: 0,
+       totalTimeMs: 0,
+       lastSeen: 0
+     };
+
+     const updatedStat: NoteStat = {
+       correct: currentStat.correct + (isCorrect ? 1 : 0),
+       incorrect: currentStat.incorrect + ((!isCorrect && !isTimeout) ? 1 : 0),
+       timeouts: currentStat.timeouts + (isTimeout ? 1 : 0),
+       totalTimeMs: currentStat.totalTimeMs + timeTaken,
+       lastSeen: Date.now()
+     };
+
+     const newStats = { ...noteStats, [key]: updatedStat };
+     saveNoteStats(newStats);
+  };
+
+  const getSmartNextNote = (validNotes: Note[]): Note => {
+     // If not adaptive or no stats, return random
+     if (!gameConfig.adaptiveLearning || Object.keys(noteStats).length === 0) {
+        return validNotes[Math.floor(Math.random() * validNotes.length)];
+     }
+
+     const tuningId = activeGuitar.tuningName;
+     const now = Date.now();
+     
+     // 1. Calculate Weights
+     const weightedNotes = validNotes.map(note => {
+        const key = `${tuningId}-${note.stringIndex}-${note.fretIndex}`;
+        const stat = noteStats[key];
+
+        // Ensure we don't repeat the exact same note immediately if possible
+        if (targetNoteRef.current && 
+            targetNoteRef.current.stringIndex === note.stringIndex && 
+            targetNoteRef.current.fretIndex === note.fretIndex &&
+            validNotes.length > 1) {
+            return { note, weight: 0 };
+        }
+
+        if (!stat) {
+           // High priority for unseen notes
+           return { note, weight: 100 };
+        }
+
+        const totalAttempts = stat.correct + stat.incorrect + stat.timeouts;
+        if (totalAttempts === 0) return { note, weight: 100 };
+
+        // Metrics
+        const accuracy = stat.correct / totalAttempts; // 0 to 1
+        const avgTime = stat.totalTimeMs / totalAttempts; // ms
+        const timeSinceLastSeen = now - stat.lastSeen; // ms
+
+        // Weight Factors
+        // 1. Accuracy: Lower accuracy -> Higher weight
+        // Range: 0 to 1. Weight boost: 10 to 50.
+        const accuracyWeight = (1 - accuracy) * 50; 
+
+        // 2. Speed: Slower -> Higher weight
+        // Cap at 5000ms for calculation
+        const speedWeight = (Math.min(avgTime, 5000) / 5000) * 30;
+
+        // 3. Recency: Not seen in a while -> Higher weight (Spaced Repetition)
+        // Cap at 5 minutes (300000ms) for max weight
+        const recencyWeight = (Math.min(timeSinceLastSeen, 300000) / 300000) * 40;
+
+        // Base weight to ensure even known notes appear occasionally
+        const baseWeight = 5; 
+
+        return { note, weight: baseWeight + accuracyWeight + speedWeight + recencyWeight };
+     });
+
+     // 2. Select based on weight
+     const totalWeight = weightedNotes.reduce((sum, item) => sum + item.weight, 0);
+     let randomVal = Math.random() * totalWeight;
+     
+     for (const item of weightedNotes) {
+        if (randomVal < item.weight) return item.note;
+        randomVal -= item.weight;
+     }
+
+     return validNotes[validNotes.length - 1];
+  };
+
+  const getHeatmapData = () => {
+     const data: Record<string, { color: string, label: string, textColor?: string }> = {};
+     const tuningId = activeGuitar.tuningName;
+     
+     for (let s = 0; s < 6; s++) {
+        for (let f = 0; f <= 12; f++) {
+           const key = `${tuningId}-${s}-${f}`;
+           const stat = noteStats[key];
+           const mapKey = `${s}-${f}`;
+
+           if (!stat) {
+              data[mapKey] = { color: 'rgba(50,50,50,0.5)', label: '-', textColor: 'gray' };
+              continue;
+           }
+
+           const total = stat.correct + stat.incorrect + stat.timeouts;
+           if (total === 0) {
+              data[mapKey] = { color: 'rgba(50,50,50,0.5)', label: '-', textColor: 'gray' };
+              continue;
+           }
+
+           let color = '';
+           let label = '';
+           let textColor = 'white';
+
+           // Use reduced saturation (50%) and brightness (30-45%) for better readability and less visual overwhelm
+           if (heatmapMetric === HeatmapMetric.ACCURACY) {
+              const acc = stat.correct / total;
+              // Red (0) to Green (120)
+              const hue = acc * 120;
+              color = `hsla(${hue}, 50%, 30%, 0.95)`;
+              label = `${Math.round(acc * 100)}%`;
+           } else if (heatmapMetric === HeatmapMetric.SPEED) {
+              const avg = stat.totalTimeMs / total;
+              // Green (<1000ms) to Red (>5000ms)
+              const clamped = Math.max(1000, Math.min(5000, avg));
+              const factor = 1 - ((clamped - 1000) / 4000); // 1 (fast) to 0 (slow)
+              const hue = factor * 120;
+              color = `hsla(${hue}, 50%, 30%, 0.95)`;
+              label = `${(avg/1000).toFixed(1)}s`;
+           } else if (heatmapMetric === HeatmapMetric.FREQUENCY) {
+              // Dark Blue (low) to Lighter Blue (high)
+              // Cap visual at 20 plays
+              const factor = Math.min(total, 20) / 20; 
+              // Lightness from 20% to 45%
+              const lightness = 20 + (factor * 25);
+              color = `hsla(210, 50%, ${lightness}%, 0.95)`;
+              label = `${total}`;
+           }
+
+           data[mapKey] = { color, label, textColor };
+        }
+     }
+     return data;
+  };
+
+  // -----------------------------
 
   const triggerPowerup = (currentStreak: number): string | null => {
     let newPowerup: PowerupState | null = null;
@@ -184,28 +362,35 @@ const App: React.FC = () => {
       };
     } else if (currentStreak > 0 && currentStreak % 5 === 0) {
       const roll = Math.random();
-      if (roll < 0.33) {
+      if (roll < 0.3) {
         newPowerup = {
           type: PowerupType.FEWER_CHOICES,
           duration: duration,
           label: '50/50 Choices Active!'
         };
-      } else if (roll < 0.66) {
+      } else if (roll < 0.6) {
         const strIdx = Math.floor(Math.random() * 6);
-        // Note: Using 'String X' instead of note name here as note name depends on tuning now
         newPowerup = {
           type: PowerupType.REVEAL_NATURALS_STRING,
           value: strIdx,
           duration: duration,
           label: `Natural Notes on String ${strIdx + 1} Revealed!`
         };
-      } else {
+      } else if (roll < 0.8) {
         const fret = Math.floor(Math.random() * currentMaxFret) + 1;
         newPowerup = {
           type: PowerupType.REVEAL_FRET,
           value: fret,
           duration: duration,
           label: `Notes at Fret ${fret} Revealed!`
+        };
+      } else {
+        const target = NATURAL_NOTES[Math.floor(Math.random() * NATURAL_NOTES.length)];
+        newPowerup = {
+          type: PowerupType.REVEAL_ALL_NOTE_LOCATIONS,
+          noteTarget: target,
+          duration: duration,
+          label: `All ${target}s Revealed!`
         };
       }
     }
@@ -272,21 +457,40 @@ const App: React.FC = () => {
       validNotes.push({ stringIndex: 0, fretIndex: 1, noteName: fallbackNote });
     }
 
+    // --- ALGORITHM SELECTION ---
     let nextNote: Note;
-    let attempts = 0;
     
-    do {
-      const idx = Math.floor(Math.random() * validNotes.length);
-      nextNote = validNotes[idx];
-      attempts++;
-    } while (
-      targetNoteRef.current && 
-      nextNote.stringIndex === targetNoteRef.current.stringIndex && 
-      nextNote.fretIndex === targetNoteRef.current.fretIndex && 
-      attempts < 10
-    );
+    if (gameConfig.adaptiveLearning) {
+       // Use Smart Algorithm
+       // (Note: The getSmartNextNote logic handles 'attempts' to avoid repeats internally if possible,
+       // but strictly preventing repeats is good here too)
+       let attempts = 0;
+       do {
+          nextNote = getSmartNextNote(validNotes);
+          attempts++;
+       } while (
+         targetNoteRef.current && 
+         nextNote.stringIndex === targetNoteRef.current.stringIndex && 
+         nextNote.fretIndex === targetNoteRef.current.fretIndex && 
+         attempts < 3
+       );
+    } else {
+       // Basic Random
+       let attempts = 0;
+       do {
+        const idx = Math.floor(Math.random() * validNotes.length);
+        nextNote = validNotes[idx];
+        attempts++;
+       } while (
+        targetNoteRef.current && 
+        nextNote.stringIndex === targetNoteRef.current.stringIndex && 
+        nextNote.fretIndex === targetNoteRef.current.fretIndex && 
+        attempts < 10
+       );
+    }
     
     setTargetNote(nextNote);
+    noteStartTimeRef.current = Date.now(); // Start timing the question
     
     const isFewerChoices = currentPowerup?.type === PowerupType.FEWER_CHOICES;
 
@@ -345,7 +549,7 @@ const App: React.FC = () => {
         handleTimeout();
       }
     }, 100);
-  }, [currentMaxFret, difficulty, getValidNotes, gameConfig]);
+  }, [currentMaxFret, difficulty, getValidNotes, gameConfig, noteStats]); // Added noteStats dependency so algo updates
 
   // Effect to start the game loop only after state (like maxFret) has settled
   useEffect(() => {
@@ -375,6 +579,12 @@ const App: React.FC = () => {
     if (gameStateRef.current !== GameState.PLAYING) return;
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     
+    // Record Stats
+    if (targetNoteRef.current) {
+       const timeTaken = Date.now() - noteStartTimeRef.current;
+       recordNoteResult(targetNoteRef.current, false, timeTaken, true);
+    }
+
     // Block Input
     setIsProcessing(true);
     
@@ -418,7 +628,13 @@ const App: React.FC = () => {
     setIsProcessing(true);
     setSelectedAnswer(selectedNote);
 
-    if (selectedNote === targetNote.noteName) {
+    const timeTaken = Date.now() - noteStartTimeRef.current;
+    const isCorrect = selectedNote === targetNote.noteName;
+    
+    // Record Stats
+    recordNoteResult(targetNote, isCorrect, timeTaken, false);
+
+    if (isCorrect) {
       const newScore = score + 1;
       const newStreak = streak + 1;
       setScore(newScore);
@@ -496,8 +712,6 @@ const App: React.FC = () => {
     targetNoteRef.current = null;
     activePowerupRef.current = null;
     gameStateRef.current = GameState.PLAYING;
-    // Removed direct call to generateNewNote() here. 
-    // It will be triggered by the useEffect once state settles.
   };
 
   // ... Study Mode Handlers
@@ -571,6 +785,7 @@ const App: React.FC = () => {
           profiles={guitarProfiles}
           activeProfileId={activeGuitarId}
           accidentalPreference={accidentalPreference}
+          adaptiveLearning={gameConfig.adaptiveLearning}
           onProfileChange={(id) => saveGuitars(guitarProfiles, id)}
           onProfileUpdate={(updated) => {
              const newProfiles = guitarProfiles.map(p => p.id === updated.id ? updated : p);
@@ -581,6 +796,10 @@ const App: React.FC = () => {
              saveGuitars(newProfiles, activeGuitarId);
           }}
           onAccidentalPreferenceChange={saveAccidentalPreference}
+          onAdaptiveLearningChange={(enabled) => {
+             setGameConfig(p => ({ ...p, adaptiveLearning: enabled }));
+             localStorage.setItem('fretmaster_adaptive_learning', String(enabled));
+          }}
           onClose={() => setShowGuitarSettings(false)}
         />
       )}
@@ -598,6 +817,9 @@ const App: React.FC = () => {
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex justify-center items-center pointer-events-none w-full md:w-auto">
            {gameState === GameState.STUDY && (
               <span className="px-4 py-1.5 bg-blue-900 text-blue-200 rounded-full font-bold text-xs uppercase tracking-wider border border-blue-700/50 shadow-sm">Study Mode</span>
+           )}
+           {gameState === GameState.STATS && (
+              <span className="px-4 py-1.5 bg-purple-900 text-purple-200 rounded-full font-bold text-xs uppercase tracking-wider border border-purple-700/50 shadow-sm">Performance Stats</span>
            )}
            {gameState === GameState.PLAYING && (
               <div className="flex flex-col items-center pointer-events-auto">
@@ -646,6 +868,17 @@ const App: React.FC = () => {
               <div className="flex flex-col md:flex-row gap-4 w-full max-w-lg">
                   <button onClick={startGame} className="flex-1 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl font-bold text-lg shadow-xl shadow-blue-900/20 transition-all transform hover:-translate-y-1">Start Game</button>
                   <button onClick={() => setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} onClickCapture={() => setGameState(GameState.STUDY)} className="px-6 py-4 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold transition-all border border-gray-600">Study Mode</button>
+              </div>
+              
+              {/* Stats & Heatmap Entry */}
+              <div className="w-full max-w-lg mt-2">
+                 <button 
+                   onClick={() => setGameState(GameState.STATS)}
+                   className="w-full py-3 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-xl flex items-center justify-center gap-2 group transition-all"
+                 >
+                   <span className="text-purple-400">📊</span>
+                   <span className="font-bold text-gray-300 group-hover:text-white">View Performance Stats & Heatmap</span>
+                 </button>
               </div>
               
               <div className="w-full max-w-3xl">
@@ -732,7 +965,7 @@ const App: React.FC = () => {
                  <Fretboard 
                     isStudyMode={true}
                     activeNote={null} 
-                    maxFret={12} 
+                    maxFret={studyMaxFret} 
                     activePowerup={null} 
                     highlightNotes={getVisibleNotesForStudy()}
                     scaleNotes={getActiveScaleNotes()}
@@ -751,9 +984,47 @@ const App: React.FC = () => {
                     orientation={isMobile ? 'vertical' : 'horizontal'}
                     tuningOffsets={activeGuitar.tuning}
                     accidentalPreference={accidentalPreference}
+                    onMaxFretChange={(val) => setStudyMaxFret(val)}
                  />
                </div>
             </div>
+           </div>
+        )}
+        
+        {/* STATS MODE SCREEN */}
+        {gameState === GameState.STATS && (
+           <div className="flex flex-col items-center h-full overflow-hidden">
+              <div className="w-full max-w-4xl px-4 py-2 flex items-center justify-between">
+                 <h2 className="text-xl font-bold text-gray-200">Heatmap Analysis</h2>
+                 <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700">
+                    <button onClick={() => setHeatmapMetric(HeatmapMetric.ACCURACY)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.ACCURACY ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Accuracy</button>
+                    <button onClick={() => setHeatmapMetric(HeatmapMetric.SPEED)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.SPEED ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Speed</button>
+                    <button onClick={() => setHeatmapMetric(HeatmapMetric.FREQUENCY)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.FREQUENCY ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Plays</button>
+                 </div>
+              </div>
+
+              <div className="flex-1 w-full flex justify-center pb-2 pt-2 px-2 md:px-4 min-h-0">
+               <div className="h-full w-full max-w-7xl relative">
+                  <Fretboard 
+                     activeNote={null}
+                     maxFret={12}
+                     activePowerup={null}
+                     isStudyMode={false} // Minimal UI
+                     orientation={isMobile ? 'vertical' : 'horizontal'}
+                     tuningOffsets={activeGuitar.tuning}
+                     heatmapData={getHeatmapData()}
+                     rootNote={gameConfig.keyRoot} // Pass for display names if key context is needed
+                     scaleType={gameConfig.keyScale}
+                     accidentalPreference={accidentalPreference}
+                  />
+                  {/* Overlay Back Button */}
+                  <div className="absolute bottom-4 right-4 z-50">
+                     <button onClick={() => setGameState(GameState.MENU)} className="px-6 py-2 bg-gray-800/90 hover:bg-gray-700 text-white border border-gray-600 rounded-lg shadow-xl font-bold backdrop-blur-sm">
+                        Back to Menu
+                     </button>
+                  </div>
+               </div>
+              </div>
            </div>
         )}
 
@@ -783,9 +1054,9 @@ const App: React.FC = () => {
               {/* Right: Health Bar */}
               <div className="flex justify-end items-center gap-2 w-1/3">
                  <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden sm:inline">HP</span>
-                 <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full border border-gray-700 relative">
+                 <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full border border-gray-700 relative isolate" style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden', WebkitMaskImage: '-webkit-radial-gradient(white, black)' }}>
                     <div
-                      className={`h-full rounded-full transition-[width,background-color] duration-300 ease-out ${getHealthColorClass(health, MAX_HEALTH)}`}
+                      className={`h-full rounded-full transition-all duration-300 ease-out ${getHealthColorClass(health, MAX_HEALTH)}`}
                       style={{ width: `${(health / MAX_HEALTH) * 100}%` }}
                     />
                  </div>
@@ -803,10 +1074,14 @@ const App: React.FC = () => {
             </div>
 
             {/* Timer Bar - Fixed Height */}
-            <div className="flex-none w-full max-w-4xl h-2 bg-gray-800 rounded-full mb-4 relative">
+            <div className="flex-none w-full max-w-4xl h-2 bg-gray-800 rounded-full mb-4 relative overflow-hidden isolate" style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden', WebkitMaskImage: '-webkit-radial-gradient(white, black)' }}>
                <div
-                  className={`h-full rounded-full transition-[width] duration-100 ease-linear ${timer < 30 ? 'bg-red-500' : 'bg-blue-500'}`}
-                  style={{ width: `${timer}%` }}
+                  className={`h-full rounded-full origin-left ${timer < 30 ? 'bg-red-500' : 'bg-blue-500'}`}
+                  style={{ 
+                    transform: `scaleX(${timer / 100})`, 
+                    transition: 'transform 100ms linear',
+                    willChange: 'transform'
+                  }}
                />
             </div>
 

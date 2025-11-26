@@ -3,7 +3,8 @@ export enum GameState {
   MENU = 'MENU',
   PLAYING = 'PLAYING',
   GAME_OVER = 'GAME_OVER',
-  STUDY = 'STUDY'
+  STUDY = 'STUDY',
+  STATS = 'STATS'
 }
 
 export enum Difficulty {
@@ -24,6 +25,7 @@ export interface GameConfig {
   startingFret: number;
   maxFretCap: number;
   timeLimit: number;
+  adaptiveLearning: boolean;
 }
 
 export interface Note {
@@ -40,6 +42,22 @@ export interface ScoreRecord {
   focusMode?: FocusMode;
 }
 
+export interface NoteStat {
+  correct: number;
+  incorrect: number;
+  timeouts: number;
+  totalTimeMs: number;
+  lastSeen: number; // Timestamp
+}
+
+export type NoteStatsMap = Record<string, NoteStat>; // Key: "tuningId-stringIdx-fretIdx"
+
+export enum HeatmapMetric {
+  ACCURACY = 'ACCURACY',
+  SPEED = 'SPEED',
+  FREQUENCY = 'FREQUENCY'
+}
+
 export interface Feedback {
   status: 'correct' | 'incorrect' | 'neutral';
   message: string;
@@ -49,12 +67,14 @@ export enum PowerupType {
   REVEAL_NATURALS_STRING = 'REVEAL_NATURALS_STRING',
   REVEAL_FRET = 'REVEAL_FRET',
   FEWER_CHOICES = 'FEWER_CHOICES',
-  SUPER_REVEAL_ALL_NATURALS = 'SUPER_REVEAL_ALL_NATURALS'
+  SUPER_REVEAL_ALL_NATURALS = 'SUPER_REVEAL_ALL_NATURALS',
+  REVEAL_ALL_NOTE_LOCATIONS = 'REVEAL_ALL_NOTE_LOCATIONS'
 }
 
 export interface PowerupState {
   type: PowerupType;
   value?: number; // stringIndex or fretIndex depending on type
+  noteTarget?: string; // For REVEAL_ALL_NOTE_LOCATIONS
   duration: number; // questions remaining
   label: string;
 }

@@ -25,6 +25,7 @@ interface FretboardProps {
   onScaleTypeSelect?: (type: ScaleType) => void;
   onClearSelection?: () => void;
   onBackToMenu?: () => void;
+  onMaxFretChange?: (newMax: number) => void;
   
   isStudyMode?: boolean;
   orientation?: 'horizontal' | 'vertical';
@@ -32,6 +33,9 @@ interface FretboardProps {
   // Tuning
   tuningOffsets?: number[]; // Array of offsets relative to E2
   accidentalPreference?: AccidentalStyle;
+  
+  // Stats Mode
+  heatmapData?: Record<string, { color: string; label: string; textColor?: string }>; // Key: "stringIdx-fretIdx"
 }
 
 const Fretboard: React.FC<FretboardProps> = ({ 
@@ -52,10 +56,12 @@ const Fretboard: React.FC<FretboardProps> = ({
   onScaleTypeSelect,
   onClearSelection,
   onBackToMenu,
+  onMaxFretChange,
   isStudyMode = false,
   orientation = 'horizontal',
   tuningOffsets = STANDARD_TUNING_OFFSETS,
-  accidentalPreference = 'SHARP'
+  accidentalPreference = 'SHARP',
+  heatmapData
 }) => {
   const isVertical = orientation === 'vertical';
   const [showAdvancedScales, setShowAdvancedScales] = useState(false);
@@ -80,12 +86,14 @@ const Fretboard: React.FC<FretboardProps> = ({
     else if (stringIndex === 3) thickness = 2.5;
     else if (stringIndex === 4) thickness = 2;
     
-    const colorClass = isWound ? 'bg-[#b8860b]' : 'bg-[#fffaf0] opacity-80';
+    // Dim strings if in heatmap mode for better visibility
+    const opacityClass = heatmapData ? 'opacity-30' : (isWound ? '' : 'opacity-80');
+    const colorClass = isWound ? 'bg-[#b8860b]' : 'bg-[#fffaf0]';
     const shadowClass = isWound ? 'shadow-md shadow-black/40' : 'shadow-sm shadow-black/20';
 
     return {
       style: isVertical ? { width: `${thickness}px`, height: '100%' } : { height: `${thickness}px`, width: '100%' },
-      className: `${colorClass} ${shadowClass} rounded-sm transition-all duration-300`
+      className: `${colorClass} ${shadowClass} ${opacityClass} rounded-sm transition-all duration-300`
     };
   };
 
@@ -115,6 +123,8 @@ const Fretboard: React.FC<FretboardProps> = ({
           return (stringIdx === activePowerup.value && isNatural) ? noteName : null;
         case PowerupType.REVEAL_FRET:
           return fretIdx === activePowerup.value ? noteName : null;
+        case PowerupType.REVEAL_ALL_NOTE_LOCATIONS:
+          return activePowerup.noteTarget === noteName ? noteName : null;
         default:
           return null;
       }
@@ -126,6 +136,34 @@ const Fretboard: React.FC<FretboardProps> = ({
   // --- RENDER HELPERS ---
 
   const renderNoteContent = (stringIdx: number, fretIdx: number) => {
+    // 1. Heatmap Mode
+    if (heatmapData) {
+      const key = `${stringIdx}-${fretIdx}`;
+      const data = heatmapData[key];
+      
+      if (!data) return null;
+      
+      // Calculate note name for display inside heatmap tile
+      const offset = tuningOffsets[stringIdx];
+      const rawNote = getNoteAtPosition(offset, fretIdx);
+      const displayNote = getDisplayNoteName(rawNote, rootNote, scaleType, accidentalPreference as AccidentalStyle);
+
+      return (
+        <div 
+          className="absolute inset-0 z-20 flex items-center justify-center m-0.5"
+        >
+          <div 
+            className={`w-full h-full rounded flex flex-col items-center justify-center transition-colors shadow-sm`}
+            style={{ backgroundColor: data.color, color: data.textColor || 'white' }}
+          >
+             <span className="text-[10px] md:text-xs font-bold leading-none mb-0.5">{displayNote}</span>
+             <span className="text-[8px] md:text-[10px] opacity-90 leading-none">{data.label}</span>
+          </div>
+        </div>
+      );
+    }
+
+    // 2. Standard Game/Study Mode
     const revealedNote = getDisplayedNote(stringIdx, fretIdx);
     const isActive = activeNote?.fretIndex === fretIdx && activeNote?.stringIndex === stringIdx;
     const tuningOffset = tuningOffsets[stringIdx];
@@ -140,7 +178,7 @@ const Fretboard: React.FC<FretboardProps> = ({
     const fontSize = isVertical ? 'text-[9px]' : 'text-[10px]';
 
     return (
-      <div className="relative z-20 flex items-center justify-center">
+      <div className="relative z-20 flex items-center justify-center pointer-events-none">
         {isActive && (
           <div className={`${dotSize} rounded-full bg-blue-500 border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-bounce z-30 flex items-center justify-center`}>
             {displayNote && (
@@ -165,16 +203,17 @@ const Fretboard: React.FC<FretboardProps> = ({
 
   const renderMarker = (fretNum: number) => {
     if (!isMarker(fretNum)) return null;
+    const opacity = heatmapData ? 'opacity-20' : 'opacity-100';
     if (fretNum === 12) {
       return (
         <>
-          <div className={`absolute rounded-full bg-gray-800/40 z-0 ${isVertical ? 'w-3 h-3 left-1/3 top-1/2 -translate-y-1/2' : 'w-4 h-4 top-1/3 left-1/2 -translate-x-1/2'}`} />
-          <div className={`absolute rounded-full bg-gray-800/40 z-0 ${isVertical ? 'w-3 h-3 right-1/3 top-1/2 -translate-y-1/2' : 'w-4 h-4 top-2/3 left-1/2 -translate-x-1/2'}`} />
+          <div className={`absolute rounded-full bg-gray-800/40 z-0 ${opacity} ${isVertical ? 'w-3 h-3 left-1/3 top-1/2 -translate-y-1/2' : 'w-4 h-4 top-1/3 left-1/2 -translate-x-1/2'}`} />
+          <div className={`absolute rounded-full bg-gray-800/40 z-0 ${opacity} ${isVertical ? 'w-3 h-3 right-1/3 top-1/2 -translate-y-1/2' : 'w-4 h-4 top-2/3 left-1/2 -translate-x-1/2'}`} />
         </>
       );
     }
     return (
-      <div className={`absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 rounded-full bg-gray-800/40 z-0 ${isVertical ? 'w-3 h-3' : 'w-4 h-4'}`} />
+      <div className={`absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 rounded-full bg-gray-800/40 z-0 ${opacity} ${isVertical ? 'w-3 h-3' : 'w-4 h-4'}`} />
     );
   };
 
@@ -309,127 +348,153 @@ const Fretboard: React.FC<FretboardProps> = ({
       <div className={`flex flex-col flex-1 min-w-0 ${isVertical ? 'h-full' : 'h-full'}`}>
         
         {/* Fretboard Layout (Wrapper around strings/board) */}
-        <div className={`flex-1 flex ${isVertical ? 'flex-row' : 'flex-col'} relative min-h-0`}>
+        {/* Enforce Aspect Ratio in Horizontal Mode to prevent "fat" look */}
+        <div className={`flex-1 flex ${isVertical ? 'flex-row' : 'flex-col'} relative min-h-0 items-center justify-center`}>
           
-          {/* Main Board Wrapper (Includes String Labels + Brown Box) */}
-          <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'} relative`}>
+          <div 
+             className={`flex ${isVertical ? 'flex-row w-full h-full' : 'flex-col w-full'}`}
+             style={!isVertical ? { aspectRatio: 1.75, maxHeight: '100%' } : {}}
+          >
+            {/* Main Board Wrapper (Includes String Labels + Brown Box) */}
+            <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'} relative`}>
 
-            {/* String Labels (Integrated Gutter) */}
-            {isStudyMode && (
-              <div className={`
-                flex z-10 flex-shrink-0
-                ${isVertical ? 'flex-row px-4 pb-1 pl-0 h-8 items-end' : 'flex-col py-4 pr-2 w-8 items-end'}
-              `}>
-                {strings.map(stringIdx => {
-                    const isSelected = highlightLocations?.strings.includes(stringIdx);
-                    return (
-                      <div key={`gutter-wrapper-${stringIdx}`} className={`flex-1 flex items-center justify-center ${isVertical ? 'w-full' : 'h-full'}`}>
-                        <button 
-                          onClick={() => onStringToggle && onStringToggle(stringIdx)}
-                          className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border hover:scale-110 transition-transform ${isSelected ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800 text-gray-500 border-gray-600'}`}>
-                          {stringIdx + 1}
-                        </button>
-                      </div>
-                    );
-                })}
-              </div>
-            )}
-
-            {/* Main Fretboard Box */}
-            <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'} bg-[#3e2723] border-4 rounded-lg shadow-2xl relative transition-colors duration-500 ${activePowerup ? 'border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.4)]' : 'border-[#281b18]'}`}>
-              
-              {/* NUT (Fret 0) */}
-              <div className={`
-                relative flex-shrink-0 border-gray-400 bg-[#281b18] flex justify-between
-                ${isVertical ? 'h-16 border-b-4 flex-row px-4 items-center' : 'w-16 border-r-4 flex-col py-4 items-center'}
-              `}>
-                {strings.map((stringIdx) => (
-                  <div key={`nut-${stringIdx}`} className={`flex justify-center items-center relative ${isVertical ? 'w-full h-full' : 'h-full w-full'}`}>
-                    {renderNoteContent(stringIdx, 0)}
-                  </div>
-                ))}
-                <div className={`absolute text-[10px] text-gray-500 font-bold uppercase tracking-widest ${isVertical ? 'right-2 rotate-90 top-1/2 -translate-y-1/2' : 'bottom-0 w-full text-center mb-1'}`}>Nut</div>
-              </div>
-
-              {/* BOARD BODY (Frets 1+) */}
-              <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'} relative`}>
-                
-                {/* Strings (Visual Lines Layer) */}
-                <div className={`absolute inset-0 flex ${isVertical ? 'flex-row px-4' : 'flex-col py-4'} justify-between pointer-events-none z-10`}>
-                    {strings.map((idx) => {
-                      const { style, className } = getStringStyle(idx);
-                      return (
-                        <div key={`string-line-${idx}`} className={`relative flex items-center justify-center ${isVertical ? 'h-full w-full' : 'w-full h-full'}`}>
-                          <div className={className} style={style} />
+                {/* String Labels (Integrated Gutter) */}
+                {isStudyMode && (
+                <div className={`
+                    flex z-10 flex-shrink-0
+                    ${isVertical ? 'flex-row px-4 pb-1 pl-0 h-8 items-end' : 'flex-col py-4 pr-2 w-8 items-end'}
+                `}>
+                    {strings.map(stringIdx => {
+                        const isSelected = highlightLocations?.strings.includes(stringIdx);
+                        return (
+                        <div key={`gutter-wrapper-${stringIdx}`} className={`flex-1 flex items-center justify-center ${isVertical ? 'w-full' : 'h-full'}`}>
+                            <button 
+                            onClick={() => onStringToggle && onStringToggle(stringIdx)}
+                            className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border hover:scale-110 transition-transform ${isSelected ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800 text-gray-500 border-gray-600'}`}>
+                            {stringIdx + 1}
+                            </button>
                         </div>
-                      );
+                        );
                     })}
                 </div>
+                )}
 
-                {/* Frets Layer */}
-                {Array.from({ length: maxFret }).map((_, i) => {
-                  const fretNum = i + 1;
-                  return (
-                    <div 
-                      key={`fret-${fretNum}`} 
-                      className={`
-                        flex-1 flex justify-between relative group
-                        ${isVertical ? 'border-b-2 flex-row px-4 items-center' : 'border-r-2 flex-col py-4 items-center'}
-                        border-gray-400/80 
-                        ${isMarker(fretNum) ? 'bg-[#4e342e]' : ''}
-                      `}
-                    >
-                      {/* Marker Dots */}
-                      {renderMarker(fretNum)}
-
-                      {/* Note Cells */}
-                      {strings.map((stringIdx) => (
-                          <div key={`fret-${fretNum}-str-${stringIdx}`} className="flex-1 flex justify-center items-center z-20 relative w-full h-full">
-                            {renderNoteContent(stringIdx, fretNum)}
-                          </div>
-                      ))}
+                {/* Main Fretboard Box */}
+                <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'} bg-[#3e2723] border-4 rounded-lg shadow-2xl relative transition-colors duration-500 ${activePowerup ? 'border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.4)]' : 'border-[#281b18]'}`}>
+                
+                {/* NUT (Fret 0) */}
+                <div className={`
+                    relative flex-shrink-0 border-gray-400 bg-[#281b18] flex justify-between
+                    ${isVertical ? 'h-16 border-b-4 flex-row px-4 items-center' : 'w-16 border-r-4 flex-col py-4 items-center'}
+                `}>
+                    {strings.map((stringIdx) => (
+                    <div key={`nut-${stringIdx}`} className={`flex justify-center items-center relative ${isVertical ? 'w-full h-full' : 'h-full w-full'}`}>
+                        {renderNoteContent(stringIdx, 0)}
                     </div>
-                  );
-                })}
-              </div>
+                    ))}
+                    <div className={`absolute text-[10px] text-gray-500 font-bold uppercase tracking-widest ${isVertical ? 'right-2 rotate-90 top-1/2 -translate-y-1/2' : 'bottom-0 w-full text-center mb-1'}`}>Nut</div>
+                </div>
+
+                {/* BOARD BODY (Frets 1+) */}
+                <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'} relative`}>
+                    
+                    {/* Strings (Visual Lines Layer) */}
+                    <div className={`absolute inset-0 flex ${isVertical ? 'flex-row px-4' : 'flex-col py-4'} justify-between pointer-events-none z-10`}>
+                        {strings.map((idx) => {
+                        const { style, className } = getStringStyle(idx);
+                        return (
+                            <div key={`string-line-${idx}`} className={`relative flex items-center justify-center ${isVertical ? 'h-full w-full' : 'w-full h-full'}`}>
+                            <div className={className} style={style} />
+                            </div>
+                        );
+                        })}
+                    </div>
+
+                    {/* Frets Layer */}
+                    {Array.from({ length: maxFret }).map((_, i) => {
+                    const fretNum = i + 1;
+                    return (
+                        <div 
+                        key={`fret-${fretNum}`} 
+                        className={`
+                            flex-1 flex justify-between relative group
+                            ${isVertical ? 'border-b-2 flex-row px-4 items-center' : 'border-r-2 flex-col py-4 items-center'}
+                            border-gray-400/80 
+                            ${isMarker(fretNum) ? 'bg-[#4e342e]' : ''}
+                        `}
+                        >
+                        {/* Marker Dots */}
+                        {renderMarker(fretNum)}
+
+                        {/* Note Cells */}
+                        {strings.map((stringIdx) => (
+                            <div key={`fret-${fretNum}-str-${stringIdx}`} className="flex-1 flex justify-center items-center z-20 relative w-full h-full">
+                                {renderNoteContent(stringIdx, fretNum)}
+                            </div>
+                        ))}
+                        </div>
+                    );
+                    })}
+                </div>
+                </div>
             </div>
-          </div>
 
-          {/* 3. Fret Labels / Buttons */}
-          <div className={`flex ${isVertical ? 'flex-col ml-1 py-[4px] w-6' : 'flex-row mt-1 px-[4px] h-8'}`}>
-             {/* Spacer for String Labels alignment */}
-             {isStudyMode && (
-               <div className={`flex-shrink-0 ${isVertical ? 'h-8' : 'w-8'}`} />
-             )}
+            {/* 3. Fret Labels / Buttons */}
+            <div className={`flex ${isVertical ? 'flex-col ml-1 py-[4px] w-6' : 'flex-row mt-1 px-[4px] h-8'}`}>
+                {/* Spacer for String Labels alignment */}
+                {isStudyMode && (
+                <div className={`flex-shrink-0 ${isVertical ? 'h-8' : 'w-8'}`} />
+                )}
 
-             {/* Nut Button */}
-             <div className={`flex-shrink-0 flex justify-center items-center ${isVertical ? 'h-16' : 'w-16'}`}>
-                <button disabled={!isStudyMode} onClick={() => onFretToggle && onFretToggle(0)}
-                    className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-bold transition-all ${!isStudyMode ? 'text-gray-500 opacity-0 cursor-default' : highlightLocations?.frets.includes(0) ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-                    0
-                </button>
-             </div>
-             {/* Fret Buttons */}
-             <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'}`}>
-                {Array.from({ length: maxFret }).map((_, i) => {
-                   const fretNum = i + 1;
-                   const isSelected = highlightLocations?.frets.includes(fretNum);
-                   return (
-                     <div key={`fret-btn-${fretNum}`} className="flex-1 flex justify-center items-center">
-                       <button disabled={!isStudyMode} onClick={() => onFretToggle && onFretToggle(fretNum)}
-                          className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-bold transition-all ${!isStudyMode ? 'text-gray-500 cursor-default' : isSelected ? 'bg-blue-600 text-white scale-110' : 'bg-gray-800 text-gray-400'}`}>
-                          {fretNum}
-                       </button>
-                     </div>
-                   );
-                })}
-             </div>
+                {/* Nut Button */}
+                <div className={`flex-shrink-0 flex justify-center items-center ${isVertical ? 'h-16' : 'w-16'}`}>
+                    <button disabled={!isStudyMode} onClick={() => onFretToggle && onFretToggle(0)}
+                        className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-bold transition-all ${!isStudyMode ? 'text-gray-500 opacity-0 cursor-default' : highlightLocations?.frets.includes(0) ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                        0
+                    </button>
+                </div>
+                {/* Fret Buttons */}
+                <div className={`flex-1 flex ${isVertical ? 'flex-col' : 'flex-row'}`}>
+                    {Array.from({ length: maxFret }).map((_, i) => {
+                    const fretNum = i + 1;
+                    const isSelected = highlightLocations?.frets.includes(fretNum);
+                    return (
+                        <div key={`fret-btn-${fretNum}`} className="flex-1 flex justify-center items-center">
+                        <button disabled={!isStudyMode} onClick={() => onFretToggle && onFretToggle(fretNum)}
+                            className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-bold transition-all ${!isStudyMode ? 'text-gray-500 cursor-default' : isSelected ? 'bg-blue-600 text-white scale-110' : 'bg-gray-800 text-gray-400'}`}>
+                            {fretNum}
+                        </button>
+                        </div>
+                    );
+                    })}
+                </div>
+            </div>
           </div>
         </div>
 
         {/* Study Control Buttons - Positioned ONLY under the fretboard/strings column */}
         {isStudyMode && (
-          <div className="flex justify-center gap-4 mt-4 pb-2">
+          <div className="flex flex-wrap justify-center items-center gap-4 mt-4 pb-2">
+             {/* Size Control */}
+             {onMaxFretChange && (
+                <div className="flex items-center gap-2 bg-gray-800 p-1 rounded-lg border border-gray-700 shadow-lg">
+                   <span className="text-xs font-bold text-gray-500 uppercase px-2">Size</span>
+                   <button 
+                     onClick={() => onMaxFretChange(Math.max(3, maxFret - 1))}
+                     className="w-8 h-8 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded text-white font-bold transition-colors"
+                   >
+                     -
+                   </button>
+                   <span className="font-mono font-bold w-6 text-center text-blue-400">{maxFret}</span>
+                   <button 
+                     onClick={() => onMaxFretChange(Math.min(12, maxFret + 1))}
+                     className="w-8 h-8 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded text-white font-bold transition-colors"
+                   >
+                     +
+                   </button>
+                </div>
+             )}
+
              <button onClick={onClearSelection} className="px-4 py-2 bg-red-900/30 text-red-300 rounded hover:bg-red-900/50 border border-red-900/50 transition-colors text-sm font-bold shadow-lg">
                Clear Selection
              </button>

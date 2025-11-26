@@ -7,10 +7,12 @@ interface GuitarSettingsProps {
   profiles: GuitarProfile[];
   activeProfileId: string;
   accidentalPreference: AccidentalStyle;
+  adaptiveLearning: boolean;
   onProfileChange: (profileId: string) => void;
   onProfileUpdate: (updatedProfile: GuitarProfile) => void;
   onProfileCreate: (newProfile: GuitarProfile) => void;
   onAccidentalPreferenceChange: (pref: AccidentalStyle) => void;
+  onAdaptiveLearningChange: (enabled: boolean) => void;
   onClose: () => void;
 }
 
@@ -18,10 +20,12 @@ const GuitarSettings: React.FC<GuitarSettingsProps> = ({
   profiles,
   activeProfileId,
   accidentalPreference,
+  adaptiveLearning,
   onProfileChange,
   onProfileUpdate,
   onProfileCreate,
   onAccidentalPreferenceChange,
+  onAdaptiveLearningChange,
   onClose
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -116,8 +120,10 @@ const GuitarSettings: React.FC<GuitarSettingsProps> = ({
           {/* General Configuration */}
           <div className="space-y-4 pb-6 border-b border-gray-700">
             <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">General Configuration</h3>
+            
+            {/* Accidental Preference */}
             <div className="flex items-center justify-between bg-gray-800 p-4 rounded-xl border border-gray-700">
-               <span className="font-bold text-white">Accidentals</span>
+               <span className="font-bold text-white text-sm">Accidentals</span>
                <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-600">
                   <button 
                     onClick={() => onAccidentalPreferenceChange('SHARP')}
@@ -132,6 +138,20 @@ const GuitarSettings: React.FC<GuitarSettingsProps> = ({
                     ♭
                   </button>
                </div>
+            </div>
+
+            {/* Adaptive Learning Toggle */}
+            <div className="flex items-center justify-between bg-gray-800 p-4 rounded-xl border border-gray-700">
+               <div className="flex flex-col">
+                 <span className="font-bold text-white text-sm">Adaptive Learning Algorithm</span>
+                 <span className="text-xs text-gray-500 mt-1">Prioritize weaker notes based on your stats</span>
+               </div>
+               <button 
+                 onClick={() => onAdaptiveLearningChange(!adaptiveLearning)}
+                 className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ease-in-out relative ${adaptiveLearning ? 'bg-blue-600' : 'bg-gray-600'}`}
+               >
+                 <div className={`w-4 h-4 rounded-full bg-white shadow-md transform transition-transform duration-300 ${adaptiveLearning ? 'translate-x-6' : 'translate-x-0'}`} />
+               </button>
             </div>
           </div>
 
