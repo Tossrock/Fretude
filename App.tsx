@@ -783,9 +783,12 @@ const App: React.FC = () => {
               {/* Right: Health Bar */}
               <div className="flex justify-end items-center gap-2 w-1/3">
                  <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden sm:inline">HP</span>
-                 <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full overflow-hidden border border-gray-700 shadow-inner relative" style={{ transform: 'translateZ(0)' }}>
+                 <div 
+                    className="w-24 md:w-32 h-3 bg-gray-800 rounded-full overflow-hidden border border-gray-700 relative isolate" 
+                    style={{ transform: 'translate3d(0,0,0)', backfaceVisibility: 'hidden', WebkitMaskImage: '-webkit-radial-gradient(white, black)' }}
+                 >
                     <div 
-                      className={`h-full transition-transform duration-300 ease-out origin-left ${getHealthColorClass(health, MAX_HEALTH)}`} 
+                      className={`h-full transition-transform duration-300 ease-out origin-left will-change-transform ${getHealthColorClass(health, MAX_HEALTH)}`} 
                       style={{ transform: `scaleX(${health / MAX_HEALTH})` }} 
                     />
                  </div>
@@ -803,7 +806,10 @@ const App: React.FC = () => {
             </div>
 
             {/* Timer Bar - Fixed Height */}
-            <div className="flex-none w-full max-w-4xl h-2 bg-gray-800 rounded-full mb-4 overflow-hidden" style={{ transform: 'translateZ(0)' }}>
+            <div 
+                className="flex-none w-full max-w-4xl h-2 bg-gray-800 rounded-full mb-4 overflow-hidden isolate" 
+                style={{ transform: 'translate3d(0,0,0)', backfaceVisibility: 'hidden', WebkitMaskImage: '-webkit-radial-gradient(white, black)' }}
+            >
                <div 
                   className={`h-full transition-transform duration-100 ease-linear origin-left will-change-transform ${timer < 30 ? 'bg-red-500' : 'bg-blue-500'}`} 
                   style={{ transform: `scaleX(${timer / 100})` }} 
