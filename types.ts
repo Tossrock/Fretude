@@ -50,6 +50,7 @@ export interface ScoreRecord {
   focusMode?: FocusMode;
   interactions: NoteInteraction[];
   avgTimeSeconds: number;
+  tuningName?: string;
 }
 
 export interface NoteStat {

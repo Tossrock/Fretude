@@ -297,23 +297,20 @@ const App: React.FC = () => {
      const data: Record<string, { color: string, label: string, textColor?: string }> = {};
      const tuningId = activeGuitar.tuningName;
      
-     // Calculate stats on fly based on window
      let computedStats: NoteStatsMap = {};
 
-     // Use global stats if window covers everything or no history, otherwise compute from history
-     // Actually, simpler to just always use history if available for "Progression" fidelity? 
-     // But global noteStats has "lastSeen" which persists across cleared local storage if we were using a real DB.
-     // Here, we'll try to use history for the window.
-     
      const relevantHistory = history.slice(timelineWindow.start, timelineWindow.end + 1);
      
      if (relevantHistory.length === 0) {
-        // Fallback to global stats if no history selected or available
+        // Fallback to global stats (which are already keyed by tuningId, so we just filter below)
         computedStats = noteStats;
      } else {
-        // Aggregate
+        // Aggregate only records that match the current tuning
         relevantHistory.forEach(record => {
-           if (record.interactions) {
+           // Support legacy records by defaulting to Standard if tuningName is missing
+           const recordTuning = record.tuningName || 'Standard (EADGBE)';
+           
+           if (recordTuning === tuningId && record.interactions) {
              record.interactions.forEach(interaction => {
                 const key = `${tuningId}-${interaction.note.stringIndex}-${interaction.note.fretIndex}`;
                 if (!computedStats[key]) {
@@ -594,7 +591,8 @@ const App: React.FC = () => {
       maxFret: currentMaxFret,
       focusMode: gameConfig.focusMode,
       interactions: [...sessionInteractionsRef.current],
-      avgTimeSeconds: avgTime
+      avgTimeSeconds: avgTime,
+      tuningName: activeGuitar.tuningName // Save Tuning Name
     };
     
     const newHistory = [...history, newRecord];
@@ -606,7 +604,7 @@ const App: React.FC = () => {
     
     // Reset session log
     sessionInteractionsRef.current = [];
-  }, [score, difficulty, currentMaxFret, history, gameConfig]);
+  }, [score, difficulty, currentMaxFret, history, gameConfig, activeGuitar]);
 
   const handleTimeout = () => {
     if (gameStateRef.current !== GameState.PLAYING) return;

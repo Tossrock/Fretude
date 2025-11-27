@@ -384,7 +384,7 @@ const Fretboard: React.FC<FretboardProps> = ({
                             <button 
                             onClick={() => onStringToggle && onStringToggle(stringIdx)}
                             className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border hover:scale-110 transition-transform ${isSelected ? 'bg-blue-600 text-white border-blue-400' : 'bg-gray-800 text-gray-500 border-gray-600'}`}>
-                            {stringIdx + 1}
+                            {6 - stringIdx}
                             </button>
                         </div>
                         );
