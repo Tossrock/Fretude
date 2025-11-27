@@ -150,16 +150,19 @@ const Fretboard: React.FC<FretboardProps> = ({
       // Use standard coloration for the note TEXT (no badge)
       const standardColor = getNoteColor(rawNote, offset, fretIdx);
 
+      // Layout: Side-by-side in Portrait (vertical orientation), Stacked in Landscape
+      const layoutClass = isVertical ? 'flex-row gap-1' : 'flex-col gap-0.5';
+
       return (
         <div 
           className="absolute inset-0 z-20 flex items-center justify-center m-0.5"
         >
           <div 
-            className={`w-full h-full rounded flex flex-col items-center justify-center transition-colors shadow-sm`}
+            className={`w-full h-full rounded flex ${layoutClass} items-center justify-center transition-colors shadow-sm`}
             style={{ backgroundColor: data.color }}
           >
              {/* Note Badge with Uniform Dark Background */}
-             <div className="px-1.5 py-0.5 rounded bg-[rgba(40,40,40,0.85)] shadow-sm mb-0.5 backdrop-blur-[1px]">
+             <div className="px-1.5 py-0.5 rounded bg-[rgba(40,40,40,0.85)] shadow-sm backdrop-blur-[1px]">
                 <span 
                     className="text-[10px] font-black leading-none drop-shadow-sm" 
                     style={{ color: standardColor }}
