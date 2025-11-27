@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle, NoteStatsMap, NoteStat, HeatmapMetric } from './types';
+import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle, NoteStatsMap, NoteStat, HeatmapMetric, NoteInteraction } from './types';
 import { NOTES_SHARP, NATURAL_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes, STANDARD_TUNING_OFFSETS } from './constants';
 import Fretboard from './components/Fretboard';
 import StatsChart from './components/StatsChart';
@@ -59,6 +59,10 @@ const App: React.FC = () => {
   // Stats / Adaptive State
   const [noteStats, setNoteStats] = useState<NoteStatsMap>({});
   const [heatmapMetric, setHeatmapMetric] = useState<HeatmapMetric>(HeatmapMetric.SPEED);
+  const [statsTab, setStatsTab] = useState<'heatmap' | 'timeline'>('heatmap');
+  
+  // Timeline Scrubber State (indices of history)
+  const [timelineWindow, setTimelineWindow] = useState<{start: number, end: number}>({start: 0, end: 0});
 
   // New state for blocking input and visual feedback
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -98,6 +102,9 @@ const App: React.FC = () => {
   const targetNoteRef = useRef<Note | null>(null);
   const gameStateRef = useRef<GameState>(GameState.MENU);
   const noteStartTimeRef = useRef<number>(0);
+  
+  // Session tracking ref
+  const sessionInteractionsRef = useRef<NoteInteraction[]>([]);
 
   useEffect(() => {
     activePowerupRef.current = activePowerup;
@@ -121,6 +128,7 @@ const App: React.FC = () => {
       try {
         const parsedHistory = JSON.parse(savedHistory);
         setHistory(parsedHistory);
+        setTimelineWindow({ start: 0, end: parsedHistory.length > 0 ? parsedHistory.length - 1 : 0 });
         if (parsedHistory.length > 0) {
           const lastGame = parsedHistory[parsedHistory.length - 1];
           const smartStart = Math.max(lastGame.maxFret - 2, 3);
@@ -202,9 +210,10 @@ const App: React.FC = () => {
   // --- STATS & ALGORITHM LOGIC ---
 
   const recordNoteResult = (note: Note, isCorrect: boolean, timeTaken: number, isTimeout: boolean = false) => {
-     const tuningId = activeGuitar.tuningName; // Use Name or ID to differentiate if tuning changes
+     const tuningId = activeGuitar.tuningName; 
      const key = `${tuningId}-${note.stringIndex}-${note.fretIndex}`;
      
+     // 1. Update Global Stats for Algo
      const currentStat = noteStats[key] || {
        correct: 0,
        incorrect: 0,
@@ -223,6 +232,15 @@ const App: React.FC = () => {
 
      const newStats = { ...noteStats, [key]: updatedStat };
      saveNoteStats(newStats);
+     
+     // 2. Log Session Interaction
+     sessionInteractionsRef.current.push({
+       note,
+       isCorrect,
+       isTimeout,
+       timeTakenMs: timeTaken,
+       timestamp: Date.now()
+     });
   };
 
   const getSmartNextNote = (validNotes: Note[]): Note => {
@@ -234,7 +252,6 @@ const App: React.FC = () => {
      const tuningId = activeGuitar.tuningName;
      const now = Date.now();
      
-     // 1. Calculate Weights
      const weightedNotes = validNotes.map(note => {
         const key = `${tuningId}-${note.stringIndex}-${note.fretIndex}`;
         const stat = noteStats[key];
@@ -247,39 +264,23 @@ const App: React.FC = () => {
             return { note, weight: 0 };
         }
 
-        if (!stat) {
-           // High priority for unseen notes
-           return { note, weight: 100 };
-        }
+        if (!stat) return { note, weight: 100 };
 
         const totalAttempts = stat.correct + stat.incorrect + stat.timeouts;
         if (totalAttempts === 0) return { note, weight: 100 };
 
-        // Metrics
-        const accuracy = stat.correct / totalAttempts; // 0 to 1
-        const avgTime = stat.totalTimeMs / totalAttempts; // ms
-        const timeSinceLastSeen = now - stat.lastSeen; // ms
+        const accuracy = stat.correct / totalAttempts; 
+        const avgTime = stat.totalTimeMs / totalAttempts; 
+        const timeSinceLastSeen = now - stat.lastSeen;
 
-        // Weight Factors
-        // 1. Accuracy: Lower accuracy -> Higher weight
-        // Range: 0 to 1. Weight boost: 10 to 50.
         const accuracyWeight = (1 - accuracy) * 50; 
-
-        // 2. Speed: Slower -> Higher weight
-        // Cap at 5000ms for calculation
         const speedWeight = (Math.min(avgTime, 5000) / 5000) * 30;
-
-        // 3. Recency: Not seen in a while -> Higher weight (Spaced Repetition)
-        // Cap at 5 minutes (300000ms) for max weight
         const recencyWeight = (Math.min(timeSinceLastSeen, 300000) / 300000) * 40;
-
-        // Base weight to ensure even known notes appear occasionally
         const baseWeight = 5; 
 
         return { note, weight: baseWeight + accuracyWeight + speedWeight + recencyWeight };
      });
 
-     // 2. Select based on weight
      const totalWeight = weightedNotes.reduce((sum, item) => sum + item.weight, 0);
      let randomVal = Math.random() * totalWeight;
      
@@ -291,14 +292,48 @@ const App: React.FC = () => {
      return validNotes[validNotes.length - 1];
   };
 
+  // Computes Stats dynamically from selected history window
   const getHeatmapData = () => {
      const data: Record<string, { color: string, label: string, textColor?: string }> = {};
      const tuningId = activeGuitar.tuningName;
      
+     // Calculate stats on fly based on window
+     let computedStats: NoteStatsMap = {};
+
+     // Use global stats if window covers everything or no history, otherwise compute from history
+     // Actually, simpler to just always use history if available for "Progression" fidelity? 
+     // But global noteStats has "lastSeen" which persists across cleared local storage if we were using a real DB.
+     // Here, we'll try to use history for the window.
+     
+     const relevantHistory = history.slice(timelineWindow.start, timelineWindow.end + 1);
+     
+     if (relevantHistory.length === 0) {
+        // Fallback to global stats if no history selected or available
+        computedStats = noteStats;
+     } else {
+        // Aggregate
+        relevantHistory.forEach(record => {
+           if (record.interactions) {
+             record.interactions.forEach(interaction => {
+                const key = `${tuningId}-${interaction.note.stringIndex}-${interaction.note.fretIndex}`;
+                if (!computedStats[key]) {
+                  computedStats[key] = { correct: 0, incorrect: 0, timeouts: 0, totalTimeMs: 0, lastSeen: 0 };
+                }
+                const stat = computedStats[key];
+                if (interaction.isCorrect) stat.correct++;
+                else if (interaction.isTimeout) stat.timeouts++;
+                else stat.incorrect++;
+                
+                stat.totalTimeMs += interaction.timeTakenMs;
+             });
+           }
+        });
+     }
+
      for (let s = 0; s < 6; s++) {
         for (let f = 0; f <= 12; f++) {
            const key = `${tuningId}-${s}-${f}`;
-           const stat = noteStats[key];
+           const stat = computedStats[key];
            const mapKey = `${s}-${f}`;
 
            if (!stat) {
@@ -316,26 +351,21 @@ const App: React.FC = () => {
            let label = '';
            let textColor = 'white';
 
-           // Use reduced saturation (50%) and brightness (30-45%) for better readability and less visual overwhelm
+           // Reduced saturation and brightness for background to allow Note Badge to pop
            if (heatmapMetric === HeatmapMetric.ACCURACY) {
               const acc = stat.correct / total;
-              // Red (0) to Green (120)
               const hue = acc * 120;
               color = `hsla(${hue}, 50%, 30%, 0.95)`;
               label = `${Math.round(acc * 100)}%`;
            } else if (heatmapMetric === HeatmapMetric.SPEED) {
               const avg = stat.totalTimeMs / total;
-              // Green (<1000ms) to Red (>5000ms)
               const clamped = Math.max(1000, Math.min(5000, avg));
-              const factor = 1 - ((clamped - 1000) / 4000); // 1 (fast) to 0 (slow)
+              const factor = 1 - ((clamped - 1000) / 4000); 
               const hue = factor * 120;
               color = `hsla(${hue}, 50%, 30%, 0.95)`;
               label = `${(avg/1000).toFixed(1)}s`;
            } else if (heatmapMetric === HeatmapMetric.FREQUENCY) {
-              // Dark Blue (low) to Lighter Blue (high)
-              // Cap visual at 20 plays
               const factor = Math.min(total, 20) / 20; 
-              // Lightness from 20% to 45%
               const lightness = 20 + (factor * 25);
               color = `hsla(210, 50%, ${lightness}%, 0.95)`;
               label = `${total}`;
@@ -452,18 +482,13 @@ const App: React.FC = () => {
     const validNotes = getValidNotes();
     if (validNotes.length === 0) {
       console.warn("No valid notes found with current config, falling back to basic random");
-      // Fallback to key root if available, otherwise F
       const fallbackNote = gameConfig.keyRoot || 'F';
       validNotes.push({ stringIndex: 0, fretIndex: 1, noteName: fallbackNote });
     }
 
-    // --- ALGORITHM SELECTION ---
     let nextNote: Note;
     
     if (gameConfig.adaptiveLearning) {
-       // Use Smart Algorithm
-       // (Note: The getSmartNextNote logic handles 'attempts' to avoid repeats internally if possible,
-       // but strictly preventing repeats is good here too)
        let attempts = 0;
        do {
           nextNote = getSmartNextNote(validNotes);
@@ -475,7 +500,6 @@ const App: React.FC = () => {
          attempts < 3
        );
     } else {
-       // Basic Random
        let attempts = 0;
        do {
         const idx = Math.floor(Math.random() * validNotes.length);
@@ -490,7 +514,7 @@ const App: React.FC = () => {
     }
     
     setTargetNote(nextNote);
-    noteStartTimeRef.current = Date.now(); // Start timing the question
+    noteStartTimeRef.current = Date.now(); 
     
     const isFewerChoices = currentPowerup?.type === PowerupType.FEWER_CHOICES;
 
@@ -510,7 +534,6 @@ const App: React.FC = () => {
       const options = [...distractors, nextNote.noteName].sort(() => 0.5 - Math.random());
       setAnswerOptions(options);
     } else {
-      // Hard Mode Logic
       let pool = [];
       if (gameConfig.focusMode === FocusMode.NATURALS) {
         pool = NATURAL_NOTES;
@@ -521,10 +544,8 @@ const App: React.FC = () => {
       }
 
       if (isFewerChoices) {
-        // 50/50 Logic for Hard Mode: Correct + 1 Distractor
         const distractors = pool.filter(n => n !== nextNote.noteName);
         const randomDistractor = distractors[Math.floor(Math.random() * distractors.length)];
-        // If pool is small (e.g. key mode), handle gracefully
         const reducedOptions = randomDistractor 
           ? [nextNote.noteName, randomDistractor].sort(() => 0.5 - Math.random()) 
           : [nextNote.noteName];
@@ -549,9 +570,8 @@ const App: React.FC = () => {
         handleTimeout();
       }
     }, 100);
-  }, [currentMaxFret, difficulty, getValidNotes, gameConfig, noteStats]); // Added noteStats dependency so algo updates
+  }, [currentMaxFret, difficulty, getValidNotes, gameConfig, noteStats]);
 
-  // Effect to start the game loop only after state (like maxFret) has settled
   useEffect(() => {
     if (gameState === GameState.PLAYING && !targetNote && !isProcessing) {
       generateNewNote();
@@ -562,33 +582,43 @@ const App: React.FC = () => {
     cleanupTimers();
     setGameState(GameState.GAME_OVER);
     
+    // Calculate Average Time
+    const totalTime = sessionInteractionsRef.current.reduce((sum, item) => sum + item.timeTakenMs, 0);
+    const count = sessionInteractionsRef.current.length;
+    const avgTime = count > 0 ? (totalTime / count) / 1000 : 0;
+
     const newRecord: ScoreRecord = {
       date: new Date().toISOString(),
       score,
       difficulty,
       maxFret: currentMaxFret,
-      focusMode: gameConfig.focusMode
+      focusMode: gameConfig.focusMode,
+      interactions: [...sessionInteractionsRef.current],
+      avgTimeSeconds: avgTime
     };
     
     const newHistory = [...history, newRecord];
     setHistory(newHistory);
+    // Update timeline window to include new record
+    setTimelineWindow({ start: 0, end: newHistory.length - 1 });
+    
     localStorage.setItem('fretmaster_history', JSON.stringify(newHistory));
+    
+    // Reset session log
+    sessionInteractionsRef.current = [];
   }, [score, difficulty, currentMaxFret, history, gameConfig]);
 
   const handleTimeout = () => {
     if (gameStateRef.current !== GameState.PLAYING) return;
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     
-    // Record Stats
     if (targetNoteRef.current) {
        const timeTaken = Date.now() - noteStartTimeRef.current;
        recordNoteResult(targetNoteRef.current, false, timeTaken, true);
     }
 
-    // Block Input
     setIsProcessing(true);
     
-    // Format the note for feedback message
     const correctNote = targetNoteRef.current?.noteName || '?';
     const displayCorrect = getDisplayNoteName(correctNote, 
       gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
@@ -603,7 +633,6 @@ const App: React.FC = () => {
     setHealth(prev => {
       const newHealth = prev - 1;
       if (newHealth <= 0) {
-        // Wait for user to read feedback before stopping
         if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
         feedbackTimeoutRef.current = window.setTimeout(() => {
           stopGame();
@@ -622,7 +651,7 @@ const App: React.FC = () => {
   };
 
   const checkAnswer = (selectedNote: string) => {
-    if (!targetNote || isProcessing) return; // Block if already processing
+    if (!targetNote || isProcessing) return; 
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     
     setIsProcessing(true);
@@ -631,7 +660,6 @@ const App: React.FC = () => {
     const timeTaken = Date.now() - noteStartTimeRef.current;
     const isCorrect = selectedNote === targetNote.noteName;
     
-    // Record Stats
     recordNoteResult(targetNote, isCorrect, timeTaken, false);
 
     if (isCorrect) {
@@ -643,17 +671,14 @@ const App: React.FC = () => {
       let delay = 800;
       let feedbackMsg = 'Correct!';
 
-      // Powerup Check
       const powerupMsg = triggerPowerup(newStreak);
       if (powerupMsg) {
         feedbackMsg = powerupMsg;
         delay = 1500;
       }
 
-      // Level Up Check (Independent of Powerup)
       if (newScore > 0 && newScore % 5 === 0 && currentMaxFret < gameConfig.maxFretCap) {
         setCurrentMaxFret(prev => Math.min(prev + 1, gameConfig.maxFretCap));
-        // Append Level Up message if Powerup already set a message, or replace 'Correct!'
         feedbackMsg = powerupMsg ? `${powerupMsg} + Level Up!` : 'Level Up! Fretboard Expanded!';
         delay = 1500;
       }
@@ -679,7 +704,6 @@ const App: React.FC = () => {
         setFeedback({ status: 'incorrect', message: `Wrong! It was ${correctDisplay}` });
         
         if (newHealth <= 0) {
-           // Wait for user to read feedback before stopping
            if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
            feedbackTimeoutRef.current = window.setTimeout(() => {
              stopGame();
@@ -712,6 +736,7 @@ const App: React.FC = () => {
     targetNoteRef.current = null;
     activePowerupRef.current = null;
     gameStateRef.current = GameState.PLAYING;
+    sessionInteractionsRef.current = [];
   };
 
   // ... Study Mode Handlers
@@ -775,6 +800,15 @@ const App: React.FC = () => {
     const chord = getActiveChordNotes();
     const manual = studyConfig.manuallySelectedNotes;
     return Array.from(new Set([...scale, ...chord, ...manual]));
+  };
+
+  // Scrubber Helpers
+  const handleTimelineChange = (isStart: boolean, val: string) => {
+    const idx = parseInt(val, 10);
+    setTimelineWindow(prev => {
+      if (isStart) return { ...prev, start: Math.min(idx, prev.end) };
+      return { ...prev, end: Math.max(idx, prev.start) };
+    });
   };
 
   return (
@@ -948,9 +982,6 @@ const App: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <div className="w-full mt-4">
-                 <StatsChart history={history} />
-              </div>
             </div>
           </div>
         )}
@@ -994,35 +1025,108 @@ const App: React.FC = () => {
         {/* STATS MODE SCREEN */}
         {gameState === GameState.STATS && (
            <div className="flex flex-col items-center h-full overflow-hidden">
-              <div className="w-full max-w-4xl px-4 py-2 flex items-center justify-between">
-                 <h2 className="text-xl font-bold text-gray-200">Heatmap Analysis</h2>
-                 <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700">
-                    <button onClick={() => setHeatmapMetric(HeatmapMetric.ACCURACY)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.ACCURACY ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Accuracy</button>
-                    <button onClick={() => setHeatmapMetric(HeatmapMetric.SPEED)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.SPEED ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Speed</button>
-                    <button onClick={() => setHeatmapMetric(HeatmapMetric.FREQUENCY)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.FREQUENCY ? 'bg-gray-600 text-white' : 'text-gray-400'}`}>Plays</button>
+              <div className="w-full max-w-5xl px-4 py-2 flex flex-col gap-2">
+                 
+                 {/* Top Controls: Tabs & Back */}
+                 <div className="flex justify-between items-center">
+                   <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700">
+                      <button onClick={() => setStatsTab('heatmap')} className={`px-4 py-1.5 text-sm font-bold rounded transition-colors ${statsTab === 'heatmap' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}>Heatmap</button>
+                      <button onClick={() => setStatsTab('timeline')} className={`px-4 py-1.5 text-sm font-bold rounded transition-colors ${statsTab === 'timeline' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}>Performance Timeline</button>
+                   </div>
+                   <button onClick={() => setGameState(GameState.MENU)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white border border-gray-600 rounded-lg text-sm font-bold shadow transition-colors">
+                      Exit Stats
+                   </button>
                  </div>
+
+                 {/* Heatmap Controls */}
+                 {statsTab === 'heatmap' && (
+                   <div className="flex flex-col gap-2 bg-gray-800/50 p-3 rounded-xl border border-gray-700">
+                     <div className="flex justify-between items-center">
+                        <h3 className="text-gray-400 font-bold uppercase text-xs tracking-wider">Analysis Metric</h3>
+                        <div className="flex bg-gray-800 rounded p-1 border border-gray-700">
+                            <button onClick={() => setHeatmapMetric(HeatmapMetric.ACCURACY)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.ACCURACY ? 'bg-purple-600 text-white' : 'text-gray-400'}`}>Accuracy</button>
+                            <button onClick={() => setHeatmapMetric(HeatmapMetric.SPEED)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.SPEED ? 'bg-amber-600 text-white' : 'text-gray-400'}`}>Speed</button>
+                            <button onClick={() => setHeatmapMetric(HeatmapMetric.FREQUENCY)} className={`px-3 py-1 text-xs font-bold rounded ${heatmapMetric === HeatmapMetric.FREQUENCY ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>Plays</button>
+                        </div>
+                     </div>
+                     
+                     {/* Timeline Scrubber (Unified Dual Slider) */}
+                     {history.length > 1 && (
+                       <div className="mt-2 pt-2 border-t border-gray-700/50">
+                         <div className="flex justify-between text-xs text-gray-400 mb-2">
+                            <span>Window: <span className="text-white font-mono">{timelineWindow.start + 1}</span> - <span className="text-white font-mono">{timelineWindow.end + 1}</span> ({history.length} sessions)</span>
+                            <button onClick={() => setTimelineWindow({start: 0, end: history.length - 1})} className="text-blue-400 hover:text-blue-300">Reset Full History</button>
+                         </div>
+                         
+                         <div className="relative w-full h-6 flex items-center group">
+                            {/* Track Background */}
+                            <div className="absolute w-full h-1 bg-gray-700 rounded-lg"></div>
+                            {/* Active Range Track */}
+                            <div 
+                                className="absolute h-1 bg-blue-500 rounded-lg"
+                                style={{
+                                    left: `${(timelineWindow.start / (history.length - 1)) * 100}%`,
+                                    right: `${100 - (timelineWindow.end / (history.length - 1)) * 100}%`
+                                }}
+                            ></div>
+                            
+                            {/* Input 1 (Start) - Invisible but interactive */}
+                            <input 
+                              type="range" 
+                              min="0" 
+                              max={history.length - 1} 
+                              value={timelineWindow.start} 
+                              onChange={(e) => handleTimelineChange(true, e.target.value)}
+                              className="absolute w-full h-full opacity-0 pointer-events-none appearance-none z-20 [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-400 [&::-webkit-slider-thumb]:appearance-none [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-blue-400 [&::-moz-range-thumb]:border-none" 
+                           />
+                           
+                           {/* Input 2 (End) - Invisible but interactive */}
+                           <input 
+                              type="range" 
+                              min="0" 
+                              max={history.length - 1} 
+                              value={timelineWindow.end} 
+                              onChange={(e) => handleTimelineChange(false, e.target.value)}
+                              className="absolute w-full h-full opacity-0 pointer-events-none appearance-none z-20 [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:appearance-none [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none" 
+                           />
+                           
+                           {/* Visual Thumbs (Since inputs are invisible) */}
+                           <div 
+                              className="absolute w-4 h-4 bg-blue-400 rounded-full shadow border border-white/50 pointer-events-none z-10"
+                              style={{ left: `calc(${(timelineWindow.start / (history.length - 1)) * 100}% - 8px)` }}
+                           />
+                           <div 
+                              className="absolute w-4 h-4 bg-white rounded-full shadow border border-gray-400 pointer-events-none z-10"
+                              style={{ left: `calc(${(timelineWindow.end / (history.length - 1)) * 100}% - 8px)` }}
+                           />
+                         </div>
+                       </div>
+                     )}
+                   </div>
+                 )}
               </div>
 
+              {/* Stats Content Area */}
               <div className="flex-1 w-full flex justify-center pb-2 pt-2 px-2 md:px-4 min-h-0">
                <div className="h-full w-full max-w-7xl relative">
-                  <Fretboard 
-                     activeNote={null}
-                     maxFret={12}
-                     activePowerup={null}
-                     isStudyMode={false} // Minimal UI
-                     orientation={isMobile ? 'vertical' : 'horizontal'}
-                     tuningOffsets={activeGuitar.tuning}
-                     heatmapData={getHeatmapData()}
-                     rootNote={gameConfig.keyRoot} // Pass for display names if key context is needed
-                     scaleType={gameConfig.keyScale}
-                     accidentalPreference={accidentalPreference}
-                  />
-                  {/* Overlay Back Button */}
-                  <div className="absolute bottom-4 right-4 z-50">
-                     <button onClick={() => setGameState(GameState.MENU)} className="px-6 py-2 bg-gray-800/90 hover:bg-gray-700 text-white border border-gray-600 rounded-lg shadow-xl font-bold backdrop-blur-sm">
-                        Back to Menu
-                     </button>
-                  </div>
+                  {statsTab === 'heatmap' ? (
+                    <Fretboard 
+                        activeNote={null}
+                        maxFret={12}
+                        activePowerup={null}
+                        isStudyMode={false} 
+                        orientation={isMobile ? 'vertical' : 'horizontal'}
+                        tuningOffsets={activeGuitar.tuning}
+                        heatmapData={getHeatmapData()}
+                        rootNote={gameConfig.keyRoot}
+                        scaleType={gameConfig.keyScale}
+                        accidentalPreference={accidentalPreference}
+                    />
+                  ) : (
+                    <div className="h-full w-full bg-gray-900/50 rounded-xl p-4 border border-gray-700 shadow-xl overflow-hidden">
+                       <StatsChart history={history} />
+                    </div>
+                  )}
                </div>
               </div>
            </div>
@@ -1088,8 +1192,8 @@ const App: React.FC = () => {
             {/* Game Board + Controls Container */}
             <div className="w-full flex flex-col md:flex-col relative min-h-0 md:justify-center flex-1">
                {/* Fretboard Section */}
-               <div className="w-full px-2 flex flex-col items-center justify-center mb-4 flex-1 min-h-0"> {/* Added min-h-0 for nested flex scroll issues prevention, though likely not needed here, but good practice. Changed flex-initial to flex-1 */}
-                 <div className="w-full max-w-5xl h-full"> {/* Removed md:h-auto */}
+               <div className="w-full px-2 flex flex-col items-center justify-center mb-4 flex-1 min-h-0"> 
+                 <div className="w-full max-w-5xl h-full"> 
                     <Fretboard 
                         activeNote={targetNote} 
                         maxFret={currentMaxFret} 
@@ -1112,7 +1216,6 @@ const App: React.FC = () => {
                   <div className="w-full max-w-2xl flex flex-wrap justify-center gap-2 md:gap-4 px-4">
                     {answerOptions.map((note) => {
                       const hue = getNoteHue(note);
-                      // Formatted note for display
                       const displayNote = getDisplayNoteName(
                          note, 
                          gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null, 

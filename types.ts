@@ -34,12 +34,22 @@ export interface Note {
   noteName: string; // e.g., "C#"
 }
 
+export interface NoteInteraction {
+  note: Note;
+  isCorrect: boolean;
+  timeTakenMs: number;
+  isTimeout: boolean;
+  timestamp: number;
+}
+
 export interface ScoreRecord {
   date: string;
   score: number;
   difficulty: Difficulty;
   maxFret: number;
   focusMode?: FocusMode;
+  interactions: NoteInteraction[];
+  avgTimeSeconds: number;
 }
 
 export interface NoteStat {

@@ -136,6 +136,10 @@ const Fretboard: React.FC<FretboardProps> = ({
   // --- RENDER HELPERS ---
 
   const renderNoteContent = (stringIdx: number, fretIdx: number) => {
+    const offset = tuningOffsets[stringIdx];
+    const rawNote = getNoteAtPosition(offset, fretIdx);
+    const displayNote = getDisplayNoteName(rawNote, rootNote, scaleType, accidentalPreference as AccidentalStyle);
+
     // 1. Heatmap Mode
     if (heatmapData) {
       const key = `${stringIdx}-${fretIdx}`;
@@ -143,10 +147,8 @@ const Fretboard: React.FC<FretboardProps> = ({
       
       if (!data) return null;
       
-      // Calculate note name for display inside heatmap tile
-      const offset = tuningOffsets[stringIdx];
-      const rawNote = getNoteAtPosition(offset, fretIdx);
-      const displayNote = getDisplayNoteName(rawNote, rootNote, scaleType, accidentalPreference as AccidentalStyle);
+      // Use standard coloration for the note TEXT (no badge)
+      const standardColor = getNoteColor(rawNote, offset, fretIdx);
 
       return (
         <div 
@@ -154,10 +156,20 @@ const Fretboard: React.FC<FretboardProps> = ({
         >
           <div 
             className={`w-full h-full rounded flex flex-col items-center justify-center transition-colors shadow-sm`}
-            style={{ backgroundColor: data.color, color: data.textColor || 'white' }}
+            style={{ backgroundColor: data.color }}
           >
-             <span className="text-[10px] md:text-xs font-bold leading-none mb-0.5">{displayNote}</span>
-             <span className="text-[8px] md:text-[10px] opacity-90 leading-none">{data.label}</span>
+             {/* Note Badge with Uniform Dark Background */}
+             <div className="px-1.5 py-0.5 rounded bg-[rgba(40,40,40,0.85)] shadow-sm mb-0.5 backdrop-blur-[1px]">
+                <span 
+                    className="text-[10px] font-black leading-none drop-shadow-sm" 
+                    style={{ color: standardColor }}
+                >
+                    {displayNote}
+                </span>
+             </div>
+             
+             {/* Data Label */}
+             <span className="text-[9px] font-mono font-bold leading-none" style={{ color: data.textColor || 'white' }}>{data.label}</span>
           </div>
         </div>
       );
@@ -166,13 +178,14 @@ const Fretboard: React.FC<FretboardProps> = ({
     // 2. Standard Game/Study Mode
     const revealedNote = getDisplayedNote(stringIdx, fretIdx);
     const isActive = activeNote?.fretIndex === fretIdx && activeNote?.stringIndex === stringIdx;
-    const tuningOffset = tuningOffsets[stringIdx];
     
-    // Determine display name (accidental handling)
-    const displayNote = revealedNote 
-      ? getDisplayNoteName(revealedNote, rootNote, scaleType, accidentalPreference as AccidentalStyle)
-      : null;
-    
+    // Determine if the active note's name should be visible
+    // Only show if: Study Mode OR explicitly revealed by specific powerup OR if it's revealed by logic (e.g. naturally revealed?)
+    // But usually in Game Mode, the target note is hidden.
+    // getDisplayedNote returns a string if it SHOULD be shown.
+    // We check if the current active note overlaps with a revealed condition.
+    const showActiveName = isStudyMode || !!revealedNote; 
+
     // Sizing for dots
     const dotSize = isVertical ? 'w-6 h-6' : 'w-7 h-7 md:w-8 md:h-8';
     const fontSize = isVertical ? 'text-[9px]' : 'text-[10px]';
@@ -181,18 +194,18 @@ const Fretboard: React.FC<FretboardProps> = ({
       <div className="relative z-20 flex items-center justify-center pointer-events-none">
         {isActive && (
           <div className={`${dotSize} rounded-full bg-blue-500 border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-bounce z-30 flex items-center justify-center`}>
-            {displayNote && (
+            {showActiveName && displayNote && (
               <span className={`${fontSize} font-bold text-white drop-shadow-md`}>{displayNote}</span>
             )}
           </div>
         )}
         
-        {displayNote && !isActive && (
+        {revealedNote && !isActive && (
           <div
             className={`
               ${dotSize} rounded-full flex items-center justify-center ${fontSize} font-bold text-black shadow-md border border-white/20
             `}
-            style={{ backgroundColor: getNoteColor(revealedNote!, tuningOffset, fretIdx) }}
+            style={{ backgroundColor: getNoteColor(revealedNote, offset, fretIdx) }}
           >
             {displayNote}
           </div>
