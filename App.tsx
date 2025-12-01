@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle, NoteStatsMap, NoteStat, HeatmapMetric, NoteInteraction } from './types';
 import { NOTES_SHARP, NATURAL_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes, STANDARD_TUNING_OFFSETS } from './constants';
@@ -22,6 +21,16 @@ const DEFAULT_GUITAR: GuitarProfile = {
   name: 'Classical Guitar',
   tuningName: 'Standard (EADGBE)',
   tuning: [...STANDARD_TUNING_OFFSETS]
+};
+
+const DEFAULT_GAME_CONFIG: GameConfig = {
+  focusMode: FocusMode.ALL,
+  keyRoot: 'C',
+  keyScale: 'MAJOR',
+  startingFret: INITIAL_MAX_FRET,
+  maxFretCap: TOTAL_FRETS,
+  timeLimit: 10,
+  adaptiveLearning: true
 };
 
 const getHealthColorClass = (current: number, max: number) => {
@@ -73,15 +82,25 @@ const App: React.FC = () => {
   // Active Guitar Derived State
   const activeGuitar = guitarProfiles.find(p => p.id === activeGuitarId) || DEFAULT_GUITAR;
 
-  // Game Configuration State
-  const [gameConfig, setGameConfig] = useState<GameConfig>({
-    focusMode: FocusMode.ALL,
-    keyRoot: 'C',
-    keyScale: 'MAJOR',
-    startingFret: INITIAL_MAX_FRET,
-    maxFretCap: TOTAL_FRETS,
-    timeLimit: 10,
-    adaptiveLearning: true
+  // Game Configuration State with Persistence
+  const [gameConfig, setGameConfig] = useState<GameConfig>(() => {
+    if (typeof window !== 'undefined') {
+      const savedConfig = localStorage.getItem('fretmaster_game_config');
+      if (savedConfig) {
+        try {
+          return { ...DEFAULT_GAME_CONFIG, ...JSON.parse(savedConfig) };
+        } catch (e) {
+          console.error("Failed to parse saved game config", e);
+        }
+      } else {
+        // Fallback for legacy adaptive learning key
+        const savedAdaptive = localStorage.getItem('fretmaster_adaptive_learning');
+        if (savedAdaptive !== null) {
+          return { ...DEFAULT_GAME_CONFIG, adaptiveLearning: savedAdaptive === 'true' };
+        }
+      }
+    }
+    return DEFAULT_GAME_CONFIG;
   });
 
   // Study Mode State
@@ -121,7 +140,12 @@ const App: React.FC = () => {
     }
   }, [gameState]);
 
-  // Load persistence
+  // Save Game Config whenever it changes
+  useEffect(() => {
+    localStorage.setItem('fretmaster_game_config', JSON.stringify(gameConfig));
+  }, [gameConfig]);
+
+  // Load persistence (History, Guitars, etc.)
   useEffect(() => {
     const savedHistory = localStorage.getItem('fretmaster_history');
     if (savedHistory) {
@@ -129,15 +153,7 @@ const App: React.FC = () => {
         const parsedHistory = JSON.parse(savedHistory);
         setHistory(parsedHistory);
         setTimelineWindow({ start: 0, end: parsedHistory.length > 0 ? parsedHistory.length - 1 : 0 });
-        if (parsedHistory.length > 0) {
-          const lastGame = parsedHistory[parsedHistory.length - 1];
-          const smartStart = Math.max(lastGame.maxFret - 2, 3);
-          setGameConfig(prev => ({
-            ...prev,
-            startingFret: smartStart,
-            maxFretCap: TOTAL_FRETS 
-          }));
-        }
+        // NOTE: History-based startingFret override removed to respect user settings.
       } catch (e) {
         console.error("Failed to parse history", e);
       }
@@ -170,13 +186,6 @@ const App: React.FC = () => {
          setNoteStats(JSON.parse(savedStats));
        } catch (e) { console.error("Failed to parse stats", e); }
     }
-    
-    // Load Config preferences
-    const savedAdaptive = localStorage.getItem('fretmaster_adaptive_learning');
-    if (savedAdaptive !== null) {
-      setGameConfig(prev => ({ ...prev, adaptiveLearning: savedAdaptive === 'true' }));
-    }
-
   }, []);
 
   const saveGuitars = (profiles: GuitarProfile[], activeId: string) => {
@@ -830,7 +839,6 @@ const App: React.FC = () => {
           onAccidentalPreferenceChange={saveAccidentalPreference}
           onAdaptiveLearningChange={(enabled) => {
              setGameConfig(p => ({ ...p, adaptiveLearning: enabled }));
-             localStorage.setItem('fretmaster_adaptive_learning', String(enabled));
           }}
           onClose={() => setShowGuitarSettings(false)}
         />
