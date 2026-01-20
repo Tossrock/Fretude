@@ -1,10 +1,15 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { GameState, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle } from './types';
-import { NOTES_SHARP, NATURAL_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes, STANDARD_TUNING_OFFSETS } from './constants';
+import { GameState, GameMode, Difficulty, Note, ScoreRecord, Feedback, PowerupState, PowerupType, StudyConfig, ScaleType, FocusMode, GameConfig, GuitarProfile, AccidentalStyle, StaffGameConfig, ClefPreference, NoteDurationType, NoteRange } from './types';
+import { NOTES_SHARP, NATURAL_NOTES, INITIAL_MAX_FRET, TOTAL_FRETS, MAX_HEALTH, TIME_LIMIT_MS, getNoteAtPosition, getNoteHue, getScaleNotes, getDisplayNoteName, getChordNotes, STANDARD_TUNING_OFFSETS, generateRandomStaffNote, generateRandomStaffNoteInRange, StaffNoteData, getRecommendedClef } from './constants';
 import Fretboard from './components/Fretboard';
 import StatsChart from './components/StatsChart';
 import GuitarSettings from './components/GuitarSettings';
+import Staff, { NoteDuration, DURATION_NAMES } from './components/Staff';
+import StaffRangeSelector from './components/StaffRangeSelector';
+
+// All available note duration types
+const ALL_NOTE_DURATIONS: NoteDurationType[] = ['w', 'h', 'q', '8', 'wd', 'hd', 'qd', '8d'];
 
 // Hook for mobile detection
 const useIsMobile = () => {
@@ -56,7 +61,26 @@ const App: React.FC = () => {
   // New state for blocking input and visual feedback
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-  
+
+  // Staff Game Mode State
+  const [targetStaffNote, setTargetStaffNote] = useState<StaffNoteData | null>(null);
+  const [targetStaffNotes, setTargetStaffNotes] = useState<StaffNoteData[]>([]); // For multi-note mode
+  const [activeStaffNoteIndex, setActiveStaffNoteIndex] = useState<number>(0);  // Current note in sequence
+  const [currentGameMode, setCurrentGameMode] = useState<GameMode>(GameMode.FRETBOARD_TO_NOTE);
+  const [currentClef, setCurrentClef] = useState<'treble' | 'bass'>('treble'); // Active clef for current round
+
+  // Menu State: selected mode before starting
+  const [selectedMenuMode, setSelectedMenuMode] = useState<GameMode | null>(null);
+
+  // Staff Game Configuration
+  const [staffGameConfig, setStaffGameConfig] = useState<StaffGameConfig>({
+    clefPreference: 'treble',
+    noteDurations: 'all',  // Default to all note types
+    noteCount: 1,
+    noteRange: { lowNote: 'E2', highNote: 'E5' },  // Full standard guitar range
+    useGuitarTransposition: true  // Standard guitar notation: display octave higher than sounding pitch
+  });
+
   const isMobile = useIsMobile();
 
   // Active Guitar Derived State
@@ -88,6 +112,7 @@ const App: React.FC = () => {
   const startTimeRef = useRef<number>(0);
   const activePowerupRef = useRef<PowerupState | null>(null);
   const targetNoteRef = useRef<Note | null>(null);
+  const targetStaffNoteRef = useRef<StaffNoteData | null>(null);
   const gameStateRef = useRef<GameState>(GameState.MENU);
 
   useEffect(() => {
@@ -99,8 +124,12 @@ const App: React.FC = () => {
   }, [targetNote]);
 
   useEffect(() => {
+    targetStaffNoteRef.current = targetStaffNote;
+  }, [targetStaffNote]);
+
+  useEffect(() => {
     gameStateRef.current = gameState;
-    if (gameState !== GameState.PLAYING) {
+    if (gameState !== GameState.PLAYING && gameState !== GameState.PLAYING_STAFF) {
       cleanupTimers();
     }
   }, [gameState]);
@@ -489,16 +518,321 @@ const App: React.FC = () => {
     setActivePowerup(null);
     setCurrentMaxFret(gameConfig.startingFret);
     setFeedback({ status: 'neutral', message: '' });
-    setTargetNote(null); 
+    setTargetNote(null);
     setGameState(GameState.PLAYING);
+    setCurrentGameMode(GameMode.FRETBOARD_TO_NOTE);
     setIsProcessing(false);
     setSelectedAnswer(null);
     targetNoteRef.current = null;
     activePowerupRef.current = null;
     gameStateRef.current = GameState.PLAYING;
-    // Removed direct call to generateNewNote() here. 
+    // Removed direct call to generateNewNote() here.
     // It will be triggered by the useEffect once state settles.
   };
+
+  // ==========================================================================
+  // STAFF GAME MODE
+  // ==========================================================================
+
+  const generateNewStaffNote = useCallback(() => {
+    if (gameStateRef.current !== GameState.PLAYING_STAFF) return;
+
+    // Clear processing state
+    setIsProcessing(false);
+    setSelectedAnswer(null);
+    setActiveStaffNoteIndex(0);
+
+    // Get focus mode parameters
+    const focusMode = gameConfig.focusMode === FocusMode.ALL ? 'ALL'
+      : gameConfig.focusMode === FocusMode.NATURALS ? 'NATURALS'
+      : 'KEY';
+
+    // Determine clef based on preference
+    let clef: 'treble' | 'bass';
+    if (staffGameConfig.clefPreference === 'random') {
+      clef = Math.random() < 0.5 ? 'treble' : 'bass';
+    } else {
+      clef = staffGameConfig.clefPreference;
+    }
+    setCurrentClef(clef);
+
+    // Pick a random duration from enabled options
+    const durations = staffGameConfig.noteDurations === 'all'
+      ? ALL_NOTE_DURATIONS
+      : staffGameConfig.noteDurations;
+    const randomDuration = durations[
+      Math.floor(Math.random() * durations.length)
+    ] as NoteDuration;
+
+    // Generate notes (single or multi-note mode)
+    const notesToGenerate = staffGameConfig.noteCount;
+    const generatedNotes: StaffNoteData[] = [];
+
+    // Use the configured note range
+    const { lowNote, highNote } = staffGameConfig.noteRange;
+
+    for (let i = 0; i < notesToGenerate; i++) {
+      let newNote: StaffNoteData;
+      let attempts = 0;
+
+      do {
+        newNote = generateRandomStaffNoteInRange(
+          lowNote,
+          highNote,
+          focusMode,
+          gameConfig.keyRoot,
+          gameConfig.keyScale
+        );
+        // Add duration to note
+        (newNote as any).duration = randomDuration;
+        attempts++;
+      } while (
+        // Avoid duplicates in sequence
+        generatedNotes.some(n => n.noteName === newNote.noteName && n.octave === newNote.octave) &&
+        attempts < 10
+      );
+
+      generatedNotes.push(newNote);
+    }
+
+    // Set state based on single or multi-note mode
+    if (notesToGenerate === 1) {
+      setTargetStaffNote(generatedNotes[0]);
+      setTargetStaffNotes([]);
+    } else {
+      setTargetStaffNote(null);
+      setTargetStaffNotes(generatedNotes);
+    }
+
+    // Generate answer options based on the first/current note
+    const currentTargetNote = generatedNotes[0];
+
+    if (difficulty === Difficulty.EASY) {
+      let allowedDistractors = NOTES_SHARP;
+      if (gameConfig.focusMode === FocusMode.NATURALS) {
+        allowedDistractors = NATURAL_NOTES;
+      } else if (gameConfig.focusMode === FocusMode.KEY && gameConfig.keyRoot && gameConfig.keyScale) {
+        allowedDistractors = getScaleNotes(gameConfig.keyRoot, gameConfig.keyScale);
+      }
+
+      const possibleDistractors = allowedDistractors.filter(n => n !== currentTargetNote.noteName);
+      const numDistractors = 4;
+      const safeNumDistractors = Math.min(numDistractors, possibleDistractors.length);
+
+      const distractors = possibleDistractors.sort(() => 0.5 - Math.random()).slice(0, safeNumDistractors);
+      const options = [...distractors, currentTargetNote.noteName].sort(() => 0.5 - Math.random());
+      setAnswerOptions(options);
+    } else {
+      // Hard mode - show all notes in the pool
+      let pool: string[] = [];
+      if (gameConfig.focusMode === FocusMode.NATURALS) {
+        pool = NATURAL_NOTES;
+      } else if (gameConfig.focusMode === FocusMode.KEY && gameConfig.keyRoot && gameConfig.keyScale) {
+        pool = getScaleNotes(gameConfig.keyRoot, gameConfig.keyScale);
+      } else {
+        pool = NOTES_SHARP;
+      }
+      setAnswerOptions(pool);
+    }
+
+    // Start timer (longer for multi-note mode)
+    const timeMultiplier = notesToGenerate > 1 ? Math.min(notesToGenerate * 0.7, 3) : 1;
+    setTimer(100);
+    startTimeRef.current = Date.now();
+
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+
+    timerIntervalRef.current = window.setInterval(() => {
+      const elapsed = Date.now() - startTimeRef.current;
+      const limitMs = gameConfig.timeLimit * 1000 * timeMultiplier;
+      const remaining = Math.max(0, 100 - (elapsed / limitMs) * 100);
+      setTimer(remaining);
+
+      if (remaining === 0) {
+        handleStaffTimeout();
+      }
+    }, 100);
+  }, [gameConfig, difficulty, staffGameConfig]);
+
+  const handleStaffTimeout = () => {
+    if (gameStateRef.current !== GameState.PLAYING_STAFF) return;
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+
+    setIsProcessing(true);
+
+    const correctNote = targetStaffNoteRef.current?.noteName || '?';
+    const displayCorrect = getDisplayNoteName(
+      correctNote,
+      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
+      gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null,
+      accidentalPreference
+    );
+
+    setFeedback({ status: 'incorrect', message: `Time up! It was ${displayCorrect}` });
+    setStreak(0);
+
+    setHealth(prev => {
+      const newHealth = prev - 1;
+      if (newHealth <= 0) {
+        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+        feedbackTimeoutRef.current = window.setTimeout(() => {
+          stopStaffGame();
+        }, 2000);
+        return 0;
+      }
+
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = window.setTimeout(() => {
+        setFeedback({ status: 'neutral', message: '' });
+        generateNewStaffNote();
+      }, 1500);
+
+      return newHealth;
+    });
+  };
+
+  const checkStaffAnswer = (selectedNote: string) => {
+    if (isProcessing) return;
+
+    // Get the current target note (single or multi-note mode)
+    const currentTarget = targetStaffNotes.length > 0
+      ? targetStaffNotes[activeStaffNoteIndex]
+      : targetStaffNote;
+
+    if (!currentTarget) return;
+
+    setSelectedAnswer(selectedNote);
+
+    if (selectedNote === currentTarget.noteName) {
+      // Correct answer
+      const isMultiNoteMode = targetStaffNotes.length > 0;
+      const isLastNote = isMultiNoteMode && activeStaffNoteIndex === targetStaffNotes.length - 1;
+      const isSingleNote = !isMultiNoteMode;
+
+      if (isSingleNote || isLastNote) {
+        // Completed the round
+        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+        setIsProcessing(true);
+
+        const newScore = score + (isMultiNoteMode ? targetStaffNotes.length : 1);
+        const newStreak = streak + 1;
+        setScore(newScore);
+        setStreak(newStreak);
+
+        let delay = 800;
+        let feedbackMsg = isMultiNoteMode ? `All ${targetStaffNotes.length} correct!` : 'Correct!';
+
+        if (newStreak > 0 && newStreak % 5 === 0) {
+          feedbackMsg = `${newStreak} Streak! 🔥`;
+          delay = 1200;
+        }
+
+        setFeedback({ status: 'correct', message: feedbackMsg });
+
+        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+        feedbackTimeoutRef.current = window.setTimeout(() => {
+          setFeedback({ status: 'neutral', message: '' });
+          generateNewStaffNote();
+        }, delay);
+      } else {
+        // Move to next note in sequence
+        const nextIndex = activeStaffNoteIndex + 1;
+        setActiveStaffNoteIndex(nextIndex);
+        setSelectedAnswer(null);
+
+        // Update answer options for next note
+        const nextNote = targetStaffNotes[nextIndex];
+        if (difficulty === Difficulty.EASY) {
+          let allowedDistractors = NOTES_SHARP;
+          if (gameConfig.focusMode === FocusMode.NATURALS) {
+            allowedDistractors = NATURAL_NOTES;
+          } else if (gameConfig.focusMode === FocusMode.KEY && gameConfig.keyRoot && gameConfig.keyScale) {
+            allowedDistractors = getScaleNotes(gameConfig.keyRoot, gameConfig.keyScale);
+          }
+          const possibleDistractors = allowedDistractors.filter(n => n !== nextNote.noteName);
+          const distractors = possibleDistractors.sort(() => 0.5 - Math.random()).slice(0, 4);
+          const options = [...distractors, nextNote.noteName].sort(() => 0.5 - Math.random());
+          setAnswerOptions(options);
+        }
+
+        // Brief flash feedback
+        setFeedback({ status: 'correct', message: `${nextIndex}/${targetStaffNotes.length}` });
+        setTimeout(() => setFeedback({ status: 'neutral', message: '' }), 300);
+      }
+    } else {
+      // Wrong answer
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      setIsProcessing(true);
+      setStreak(0);
+
+      setHealth(prev => {
+        const newHealth = prev - 1;
+        const correctDisplay = getDisplayNoteName(
+          currentTarget.noteName,
+          gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
+          gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null,
+          accidentalPreference
+        );
+        setFeedback({ status: 'incorrect', message: `Wrong! It was ${correctDisplay}` });
+
+        if (newHealth <= 0) {
+          if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+          feedbackTimeoutRef.current = window.setTimeout(() => {
+            stopStaffGame();
+          }, 2000);
+          return 0;
+        }
+
+        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+        feedbackTimeoutRef.current = window.setTimeout(() => {
+          setFeedback({ status: 'neutral', message: '' });
+          generateNewStaffNote();
+        }, 1500);
+        return newHealth;
+      });
+    }
+  };
+
+  const stopStaffGame = useCallback(() => {
+    cleanupTimers();
+    setGameState(GameState.GAME_OVER);
+
+    const newRecord: ScoreRecord = {
+      date: new Date().toISOString(),
+      score,
+      difficulty,
+      maxFret: 0, // Not applicable for staff mode
+      focusMode: gameConfig.focusMode,
+      gameMode: GameMode.STAFF_TO_NOTE
+    };
+
+    const newHistory = [...history, newRecord];
+    setHistory(newHistory);
+    localStorage.setItem('fretmaster_history', JSON.stringify(newHistory));
+  }, [score, difficulty, history, gameConfig]);
+
+  const startStaffGame = () => {
+    cleanupTimers();
+    setScore(0);
+    setStreak(0);
+    setHealth(MAX_HEALTH);
+    setFeedback({ status: 'neutral', message: '' });
+    setTargetStaffNote(null);
+    setGameState(GameState.PLAYING_STAFF);
+    setCurrentGameMode(GameMode.STAFF_TO_NOTE);
+    setIsProcessing(false);
+    setSelectedAnswer(null);
+    targetStaffNoteRef.current = null;
+    gameStateRef.current = GameState.PLAYING_STAFF;
+    // Note generation triggered by useEffect
+  };
+
+  // Effect to start staff game loop
+  useEffect(() => {
+    if (gameState === GameState.PLAYING_STAFF && !targetStaffNote && !isProcessing) {
+      generateNewStaffNote();
+    }
+  }, [gameState, targetStaffNote, isProcessing, generateNewStaffNote]);
 
   // ... Study Mode Handlers
   const toggleStudyNote = (note: string) => {
@@ -610,6 +944,17 @@ const App: React.FC = () => {
                 </div>
               </div>
            )}
+           {gameState === GameState.PLAYING_STAFF && (
+              <div className="flex flex-col items-center pointer-events-auto">
+                <div className="flex items-center gap-2 bg-purple-900/50 px-3 py-1 rounded-full border border-purple-700/50">
+                   <span className="text-[10px] text-purple-300 font-bold uppercase tracking-wider">Sight Reading</span>
+                   <span className={`font-bold text-sm ${streak >= 5 ? 'text-amber-400 animate-pulse' : 'text-white'}`}>{streak} 🔥</span>
+                </div>
+                <div className="text-[10px] text-gray-500 font-mono mt-0.5 hidden md:block">
+                   {gameConfig.focusMode === FocusMode.KEY ? `${gameConfig.keyRoot} ${gameConfig.keyScale}` : gameConfig.focusMode === FocusMode.NATURALS ? 'Naturals' : 'Chromatic'}
+                </div>
+              </div>
+           )}
         </div>
 
         {/* Right: Guitar Config */}
@@ -643,63 +988,137 @@ const App: React.FC = () => {
                 <h2 className="text-3xl md:text-4xl font-extrabold text-white">Master the Fretboard</h2>
                 <p className="text-gray-400 max-w-lg mx-auto text-sm md:text-base">Train your memory, build speed, and track your progress.</p>
               </div>
-              <div className="flex flex-col md:flex-row gap-4 w-full max-w-lg">
-                  <button onClick={startGame} className="flex-1 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl font-bold text-lg shadow-xl shadow-blue-900/20 transition-all transform hover:-translate-y-1">Start Game</button>
-                  <button onClick={() => setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] })} onClickCapture={() => setGameState(GameState.STUDY)} className="px-6 py-4 bg-gray-700 hover:bg-gray-600 rounded-xl font-bold transition-all border border-gray-600">Study Mode</button>
-              </div>
-              
-              <div className="w-full max-w-3xl">
-                <button onClick={() => setShowSettings(!showSettings)} className="mx-auto flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors mb-4">
-                  <span>{showSettings ? 'Hide' : 'Customize'} Game Settings</span>
-                  <span className={`transform transition-transform ${showSettings ? 'rotate-180' : ''}`}>▼</span>
-                </button>
-                <div className={`overflow-hidden transition-all duration-500 ease-in-out ${showSettings ? 'max-h-[1200px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                  <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6 shadow-xl backdrop-blur-sm">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      <div className="space-y-6">
-                          <div className="space-y-2">
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Difficulty</label>
-                            <div className="flex gap-2">
-                                <button onClick={() => setDifficulty(Difficulty.EASY)} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${difficulty === Difficulty.EASY ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>Easy (Choice)</button>
-                                <button onClick={() => setDifficulty(Difficulty.HARD)} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${difficulty === Difficulty.HARD ? 'bg-red-600 text-white shadow-lg' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>Hard (Recall)</button>
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Focus Mode</label>
-                            <div className="flex flex-col gap-2">
-                                <label className="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-700/50 transition-colors">
-                                  <input type="radio" name="focusMode" checked={gameConfig.focusMode === FocusMode.ALL} onChange={() => setGameConfig(p => ({ ...p, focusMode: FocusMode.ALL }))} className="accent-blue-500" />
-                                  <div><div className="font-bold text-sm">All Notes</div><div className="text-xs text-gray-500">Full chromatic scale</div></div>
-                                </label>
-                                <label className="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-700/50 transition-colors">
-                                  <input type="radio" name="focusMode" checked={gameConfig.focusMode === FocusMode.NATURALS} onChange={() => setGameConfig(p => ({ ...p, focusMode: FocusMode.NATURALS }))} className="accent-green-500" />
-                                  <div><div className="font-bold text-sm">Naturals Only</div><div className="text-xs text-gray-500">No sharps or flats</div></div>
-                                </label>
-                                <label className="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-700/50 transition-colors">
-                                  <input type="radio" name="focusMode" checked={gameConfig.focusMode === FocusMode.KEY} onChange={() => setGameConfig(p => ({ ...p, focusMode: FocusMode.KEY }))} className="accent-purple-500" />
-                                  <div><div className="font-bold text-sm">Specific Key</div><div className="text-xs text-gray-500">Focus on a scale</div></div>
-                                </label>
-                            </div>
-                          </div>
-                          <div className="space-y-2 pt-2 border-t border-gray-700">
-                             <div className="flex justify-between text-xs font-bold text-gray-500 uppercase tracking-wider"><span>Timer Duration</span><span className="text-white">{gameConfig.timeLimit}s</span></div>
-                             <input type="range" min="3" max="30" step="1" value={gameConfig.timeLimit} onChange={(e) => setGameConfig(p => ({ ...p, timeLimit: Number(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-teal-500" />
-                          </div>
+
+              {/* Game Mode Selection */}
+              <div className="w-full max-w-2xl">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Fretboard Game */}
+                  <button
+                    onClick={() => { setSelectedMenuMode(GameMode.FRETBOARD_TO_NOTE); setShowSettings(true); }}
+                    className={`group relative p-6 rounded-2xl border transition-all transform hover:-translate-y-1 shadow-xl ${
+                      selectedMenuMode === GameMode.FRETBOARD_TO_NOTE
+                        ? 'bg-gradient-to-br from-blue-600/40 to-indigo-600/40 border-blue-400 ring-2 ring-blue-400/50'
+                        : 'bg-gradient-to-br from-blue-600/20 to-indigo-600/20 border-blue-500/30 hover:border-blue-400/50'
+                    }`}
+                  >
+                    <div className="flex flex-col items-center gap-3">
+                      <div className={`w-16 h-16 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg transition-transform ${selectedMenuMode === GameMode.FRETBOARD_TO_NOTE ? 'scale-110' : 'group-hover:scale-110'}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                        </svg>
                       </div>
-                      <div className="space-y-6">
-                          <div className={`space-y-2 transition-opacity duration-300 ${gameConfig.focusMode === FocusMode.KEY ? 'opacity-100' : 'opacity-25 pointer-events-none'}`}>
-                            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Target Key</label>
-                            <div className="flex gap-2">
-                                <select value={gameConfig.keyRoot || 'C'} onChange={(e) => setGameConfig(p => ({ ...p, keyRoot: e.target.value }))} className="bg-gray-700 text-white rounded p-2 text-sm flex-1 outline-none border border-gray-600 focus:border-blue-500">
-                                  {NOTES_SHARP.map(n => <option key={n} value={n}>{n}</option>)}
-                                </select>
-                                <select value={gameConfig.keyScale || 'MAJOR'} onChange={(e) => setGameConfig(p => ({ ...p, keyScale: e.target.value as ScaleType }))} className="bg-gray-700 text-white rounded p-2 text-sm flex-1 outline-none border border-gray-600 focus:border-blue-500">
-                                  <option value="MAJOR">Major</option>
-                                  <option value="NATURAL_MINOR">Minor</option>
-                                </select>
-                            </div>
+                      <div className="text-center">
+                        <h3 className="text-lg font-bold text-white">Fretboard Training</h3>
+                        <p className="text-xs text-gray-400 mt-1">See a note on the fretboard, name it</p>
+                      </div>
+                    </div>
+                    {selectedMenuMode === GameMode.FRETBOARD_TO_NOTE && (
+                      <div className="absolute -top-2 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Staff Reading Game */}
+                  <button
+                    onClick={() => { setSelectedMenuMode(GameMode.STAFF_TO_NOTE); setShowSettings(true); }}
+                    className={`group relative p-6 rounded-2xl border transition-all transform hover:-translate-y-1 shadow-xl ${
+                      selectedMenuMode === GameMode.STAFF_TO_NOTE
+                        ? 'bg-gradient-to-br from-purple-600/40 to-pink-600/40 border-purple-400 ring-2 ring-purple-400/50'
+                        : 'bg-gradient-to-br from-purple-600/20 to-pink-600/20 border-purple-500/30 hover:border-purple-400/50'
+                    }`}
+                  >
+                    <div className="flex flex-col items-center gap-3">
+                      <div className={`w-16 h-16 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center shadow-lg transition-transform ${selectedMenuMode === GameMode.STAFF_TO_NOTE ? 'scale-110' : 'group-hover:scale-110'}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+                        </svg>
+                      </div>
+                      <div className="text-center">
+                        <h3 className="text-lg font-bold text-white">Sight Reading</h3>
+                        <p className="text-xs text-gray-400 mt-1">See a note on the staff, name it</p>
+                      </div>
+                    </div>
+                    {selectedMenuMode === GameMode.STAFF_TO_NOTE && (
+                      <div className="absolute -top-2 -right-2 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center">
+                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                      </div>
+                    )}
+                  </button>
+                </div>
+
+                {/* Study Mode Button */}
+                <button
+                  onClick={() => { setStudyConfig({ rootNote: null, activeChords: [], scaleType: null, manuallySelectedNotes: [], activeStrings: [], activeFrets: [] }); setGameState(GameState.STUDY); }}
+                  className="w-full mt-4 py-3 bg-gray-700/50 hover:bg-gray-600/50 rounded-xl font-bold transition-all border border-gray-600 text-gray-300 hover:text-white"
+                >
+                  Study Mode
+                </button>
+              </div>
+
+              {/* Settings Panel - Expands when mode selected */}
+              <div className={`w-full max-w-3xl overflow-hidden transition-all duration-500 ease-in-out ${selectedMenuMode && showSettings ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className="bg-gray-800/50 rounded-2xl border border-gray-700 p-6 shadow-xl backdrop-blur-sm">
+                  {/* Start Game Button */}
+                  <button
+                    onClick={() => selectedMenuMode === GameMode.STAFF_TO_NOTE ? startStaffGame() : startGame()}
+                    className={`w-full py-4 mb-6 rounded-xl font-bold text-lg shadow-xl transition-all transform hover:-translate-y-0.5 ${
+                      selectedMenuMode === GameMode.STAFF_TO_NOTE
+                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-purple-900/30'
+                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-900/30'
+                    }`}
+                  >
+                    Start {selectedMenuMode === GameMode.STAFF_TO_NOTE ? 'Sight Reading' : 'Fretboard Training'}
+                  </button>
+
+                  {/* Common Settings */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-6">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Difficulty</label>
+                          <div className="flex gap-2">
+                              <button onClick={() => setDifficulty(Difficulty.EASY)} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${difficulty === Difficulty.EASY ? 'bg-amber-600 text-white shadow-lg' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>Easy (Choice)</button>
+                              <button onClick={() => setDifficulty(Difficulty.HARD)} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${difficulty === Difficulty.HARD ? 'bg-red-600 text-white shadow-lg' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>Hard (Recall)</button>
                           </div>
-                          <div className="space-y-4 pt-2 border-t border-gray-700">
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Focus Mode</label>
+                          <div className="flex flex-col gap-2">
+                              <label className="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-700/50 transition-colors">
+                                <input type="radio" name="focusMode" checked={gameConfig.focusMode === FocusMode.ALL} onChange={() => setGameConfig(p => ({ ...p, focusMode: FocusMode.ALL }))} className="accent-blue-500" />
+                                <div><div className="font-bold text-sm">All Notes</div><div className="text-xs text-gray-500">Full chromatic scale</div></div>
+                              </label>
+                              <label className="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-700/50 transition-colors">
+                                <input type="radio" name="focusMode" checked={gameConfig.focusMode === FocusMode.NATURALS} onChange={() => setGameConfig(p => ({ ...p, focusMode: FocusMode.NATURALS }))} className="accent-green-500" />
+                                <div><div className="font-bold text-sm">Naturals Only</div><div className="text-xs text-gray-500">No sharps or flats</div></div>
+                              </label>
+                              <label className="flex items-center gap-3 p-2 rounded cursor-pointer hover:bg-gray-700/50 transition-colors">
+                                <input type="radio" name="focusMode" checked={gameConfig.focusMode === FocusMode.KEY} onChange={() => setGameConfig(p => ({ ...p, focusMode: FocusMode.KEY }))} className="accent-purple-500" />
+                                <div><div className="font-bold text-sm">Specific Key</div><div className="text-xs text-gray-500">Focus on a scale</div></div>
+                              </label>
+                          </div>
+                        </div>
+                        <div className={`space-y-2 transition-opacity duration-300 ${gameConfig.focusMode === FocusMode.KEY ? 'opacity-100' : 'opacity-25 pointer-events-none'}`}>
+                          <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Target Key</label>
+                          <div className="flex gap-2">
+                              <select value={gameConfig.keyRoot || 'C'} onChange={(e) => setGameConfig(p => ({ ...p, keyRoot: e.target.value }))} className="bg-gray-700 text-white rounded p-2 text-sm flex-1 outline-none border border-gray-600 focus:border-blue-500">
+                                {NOTES_SHARP.map(n => <option key={n} value={n}>{n}</option>)}
+                              </select>
+                              <select value={gameConfig.keyScale || 'MAJOR'} onChange={(e) => setGameConfig(p => ({ ...p, keyScale: e.target.value as ScaleType }))} className="bg-gray-700 text-white rounded p-2 text-sm flex-1 outline-none border border-gray-600 focus:border-blue-500">
+                                <option value="MAJOR">Major</option>
+                                <option value="NATURAL_MINOR">Minor</option>
+                              </select>
+                          </div>
+                        </div>
+                        <div className="space-y-2 pt-2 border-t border-gray-700">
+                           <div className="flex justify-between text-xs font-bold text-gray-500 uppercase tracking-wider"><span>Timer Duration</span><span className="text-white">{gameConfig.timeLimit}s</span></div>
+                           <input type="range" min="3" max="30" step="1" value={gameConfig.timeLimit} onChange={(e) => setGameConfig(p => ({ ...p, timeLimit: Number(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-teal-500" />
+                        </div>
+                    </div>
+                    <div className="space-y-6">
+                        {/* Fretboard-specific settings */}
+                        {selectedMenuMode === GameMode.FRETBOARD_TO_NOTE && (
+                          <div className="space-y-4">
                             <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Fret Range Config</label>
                             <div className="space-y-1">
                                 <div className="flex justify-between text-xs"><span>Starting Size</span><span className="font-bold text-blue-400">0 - {gameConfig.startingFret}</span></div>
@@ -710,11 +1129,172 @@ const App: React.FC = () => {
                                 <input type="range" min={gameConfig.startingFret} max={TOTAL_FRETS} value={gameConfig.maxFretCap} onChange={(e) => setGameConfig(p => ({ ...p, maxFretCap: Number(e.target.value) }))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-orange-500" />
                             </div>
                           </div>
-                      </div>
+                        )}
+
+                        {/* Staff-specific settings */}
+                        {selectedMenuMode === GameMode.STAFF_TO_NOTE && (
+                          <div className="space-y-4">
+                            {/* Clef Selection */}
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Clef</label>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => setStaffGameConfig(p => ({ ...p, clefPreference: 'treble' }))}
+                                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${staffGameConfig.clefPreference === 'treble' ? 'bg-purple-600 text-white shadow-lg' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                                >
+                                  Treble
+                                </button>
+                                <button
+                                  onClick={() => setStaffGameConfig(p => ({ ...p, clefPreference: 'bass' }))}
+                                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${staffGameConfig.clefPreference === 'bass' ? 'bg-purple-600 text-white shadow-lg' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                                >
+                                  Bass
+                                </button>
+                                <button
+                                  onClick={() => setStaffGameConfig(p => ({ ...p, clefPreference: 'random' }))}
+                                  className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${staffGameConfig.clefPreference === 'random' ? 'bg-purple-600 text-white shadow-lg' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                                >
+                                  Random
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Guitar Transposition Toggle */}
+                            <div className="space-y-2 pt-2 border-t border-gray-700">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Guitar Notation</label>
+                                  <p className="text-xs text-gray-500 mt-1">Standard guitar: written octave higher</p>
+                                </div>
+                                <button
+                                  onClick={() => setStaffGameConfig(p => ({ ...p, useGuitarTransposition: !p.useGuitarTransposition }))}
+                                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                    staffGameConfig.useGuitarTransposition ? 'bg-purple-600' : 'bg-gray-600'
+                                  }`}
+                                >
+                                  <span
+                                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                      staffGameConfig.useGuitarTransposition ? 'translate-x-6' : 'translate-x-1'
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Note Range Selector */}
+                            <div className="space-y-2 pt-2 border-t border-gray-700">
+                              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Note Range</label>
+                              <StaffRangeSelector
+                                value={staffGameConfig.noteRange}
+                                onChange={(range) => setStaffGameConfig(p => ({ ...p, noteRange: range }))}
+                                clef={staffGameConfig.clefPreference === 'random' ? 'treble' : staffGameConfig.clefPreference}
+                                octaveTransposition={staffGameConfig.useGuitarTransposition ? 1 : 0}
+                              />
+                            </div>
+
+                            {/* Note Durations */}
+                            <div className="space-y-2 pt-2 border-t border-gray-700">
+                              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Note Types</label>
+                              {/* All Notes toggle */}
+                              <button
+                                onClick={() => setStaffGameConfig(p => ({ ...p, noteDurations: 'all' }))}
+                                className={`w-full py-2 rounded-lg font-bold text-sm transition-all ${
+                                  staffGameConfig.noteDurations === 'all'
+                                    ? 'bg-purple-600 text-white shadow-lg'
+                                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                }`}
+                              >
+                                All Note Types
+                              </button>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {(['w', 'h', 'q', '8'] as NoteDurationType[]).map(dur => {
+                                  const isSelected = staffGameConfig.noteDurations === 'all' ||
+                                    (Array.isArray(staffGameConfig.noteDurations) && staffGameConfig.noteDurations.includes(dur));
+                                  return (
+                                    <button
+                                      key={dur}
+                                      onClick={() => {
+                                        setStaffGameConfig(p => {
+                                          // If currently 'all', switch to just this one
+                                          if (p.noteDurations === 'all') {
+                                            return { ...p, noteDurations: [dur] };
+                                          }
+                                          const has = p.noteDurations.includes(dur);
+                                          const newDurations = has
+                                            ? p.noteDurations.filter(d => d !== dur)
+                                            : [...p.noteDurations, dur];
+                                          return { ...p, noteDurations: newDurations.length > 0 ? newDurations : [dur] };
+                                        });
+                                      }}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                        isSelected
+                                          ? 'bg-purple-600 text-white'
+                                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                      }`}
+                                    >
+                                      {DURATION_NAMES[dur]}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {(['wd', 'hd', 'qd', '8d'] as NoteDurationType[]).map(dur => {
+                                  const isSelected = staffGameConfig.noteDurations === 'all' ||
+                                    (Array.isArray(staffGameConfig.noteDurations) && staffGameConfig.noteDurations.includes(dur));
+                                  return (
+                                    <button
+                                      key={dur}
+                                      onClick={() => {
+                                        setStaffGameConfig(p => {
+                                          if (p.noteDurations === 'all') {
+                                            return { ...p, noteDurations: [dur] };
+                                          }
+                                          const has = p.noteDurations.includes(dur);
+                                          const newDurations = has
+                                            ? p.noteDurations.filter(d => d !== dur)
+                                            : [...p.noteDurations, dur];
+                                          return { ...p, noteDurations: newDurations.length > 0 ? newDurations : [dur] };
+                                        });
+                                      }}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                        isSelected
+                                          ? 'bg-purple-600 text-white'
+                                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                      }`}
+                                    >
+                                      {DURATION_NAMES[dur]}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Note Count (multi-note mode) */}
+                            <div className="space-y-2 pt-2 border-t border-gray-700">
+                              <div className="flex justify-between text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                <span>Notes Per Round</span>
+                                <span className="text-purple-400">{staffGameConfig.noteCount}</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="1"
+                                max="8"
+                                step="1"
+                                value={staffGameConfig.noteCount}
+                                onChange={(e) => setStaffGameConfig(p => ({ ...p, noteCount: Number(e.target.value) }))}
+                                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                              />
+                              <p className="text-xs text-gray-500">
+                                {staffGameConfig.noteCount === 1 ? 'Single note per question' : `Identify ${staffGameConfig.noteCount} notes in sequence`}
+                              </p>
+                            </div>
+                          </div>
+                        )}
                     </div>
                   </div>
                 </div>
               </div>
+
               <div className="w-full mt-4">
                  <StatsChart history={history} />
               </div>
@@ -875,21 +1455,169 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* PLAYING STAFF SCREEN */}
+        {gameState === GameState.PLAYING_STAFF && (
+          <div className="flex flex-col items-center h-full justify-start pt-4 md:pt-10 px-2 overflow-hidden">
+
+            {/* Top Stats Area - Fixed Height */}
+            <div className="flex-none w-full max-w-4xl flex justify-between items-center mb-2 px-4 gap-4">
+              {/* Left: Score */}
+              <div className="flex items-center gap-2 w-1/3">
+                 <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden xs:inline">Score</span>
+                 <span className="text-3xl font-mono text-purple-400">{score}</span>
+              </div>
+
+              {/* Center: Finish Button */}
+              <div className="flex justify-center w-1/3">
+                <button
+                    onClick={stopStaffGame}
+                    disabled={isProcessing}
+                    className="px-4 py-1.5 rounded-lg border border-gray-700 bg-gray-800 text-gray-400 font-bold text-xs uppercase tracking-wider hover:text-white hover:border-gray-500 hover:bg-gray-700 transition-all shadow-sm"
+                >
+                    Finish
+                </button>
+              </div>
+
+              {/* Right: Health Bar */}
+              <div className="flex justify-end items-center gap-2 w-1/3">
+                 <span className="text-gray-400 uppercase text-xs font-bold tracking-wider hidden sm:inline">HP</span>
+                 <div className="w-24 md:w-32 h-3 bg-gray-800 rounded-full border border-gray-700 relative">
+                    <div
+                      className={`h-full rounded-full transition-[width,background-color] duration-300 ease-out ${getHealthColorClass(health, MAX_HEALTH)}`}
+                      style={{ width: `${(health / MAX_HEALTH) * 100}%` }}
+                    />
+                 </div>
+              </div>
+            </div>
+
+            {/* Timer Bar - Fixed Height */}
+            <div className="flex-none w-full max-w-4xl h-2 bg-gray-800 rounded-full mb-4 relative">
+               <div
+                  className={`h-full rounded-full transition-[width] duration-100 ease-linear ${timer < 30 ? 'bg-red-500' : 'bg-purple-500'}`}
+                  style={{ width: `${timer}%` }}
+               />
+            </div>
+
+            {/* Staff Display + Controls Container */}
+            <div className="w-full flex flex-col items-center flex-1 min-h-0">
+               {/* Multi-note progress indicator */}
+               {targetStaffNotes.length > 1 && (
+                 <div className="flex items-center gap-2 mb-2">
+                   <span className="text-xs text-gray-500 uppercase tracking-wider">Note</span>
+                   <div className="flex gap-1">
+                     {targetStaffNotes.map((_, idx) => (
+                       <div
+                         key={idx}
+                         className={`w-2 h-2 rounded-full transition-colors ${
+                           idx < activeStaffNoteIndex
+                             ? 'bg-green-500'
+                             : idx === activeStaffNoteIndex
+                             ? 'bg-purple-500 animate-pulse'
+                             : 'bg-gray-600'
+                         }`}
+                       />
+                     ))}
+                   </div>
+                   <span className="text-xs text-gray-400">{activeStaffNoteIndex + 1}/{targetStaffNotes.length}</span>
+                 </div>
+               )}
+
+               {/* Staff Section */}
+               <div className="w-full max-w-3xl flex justify-center items-center mb-8 px-4">
+                 <div className="bg-gray-800/50 rounded-2xl p-4 border border-gray-700/50 shadow-xl">
+                   <Staff
+                     note={targetStaffNotes.length === 0 ? targetStaffNote : undefined}
+                     notes={targetStaffNotes.length > 0 ? targetStaffNotes : undefined}
+                     activeNoteIndex={activeStaffNoteIndex}
+                     clef={currentClef}
+                     width={isMobile ? 300 : (targetStaffNotes.length > 1 ? Math.min(600, 200 + targetStaffNotes.length * 60) : 400)}
+                     height={isMobile ? 150 : 180}
+                     showClef={true}
+                     feedbackState={feedback.status}
+                     accidentalPreference={accidentalPreference}
+                     animated={!isProcessing}
+                     octaveTransposition={staffGameConfig.useGuitarTransposition ? 1 : 0}
+                   />
+                 </div>
+               </div>
+
+               {/* Controls Section */}
+               <div className="flex-none w-full flex flex-col items-center pb-8 md:pb-0">
+                  <div className={`h-6 mb-2 font-bold text-lg transition-opacity ${feedback.message ? 'opacity-100' : 'opacity-0'} ${feedback.status === 'correct' ? 'text-green-400' : 'text-red-400'}`}>
+                    {feedback.message}
+                  </div>
+
+                  <div className="w-full max-w-2xl flex flex-wrap justify-center gap-2 md:gap-4 px-4">
+                    {answerOptions.map((note) => {
+                      const hue = getNoteHue(note);
+                      const displayNote = getDisplayNoteName(
+                         note,
+                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyRoot : null,
+                         gameConfig.focusMode === FocusMode.KEY ? gameConfig.keyScale : null,
+                         accidentalPreference
+                      );
+
+                      const isSelected = note === selectedAnswer;
+                      const processingStyle = isProcessing
+                         ? (isSelected ? 'opacity-100 ring-2 ring-white scale-105' : 'opacity-30 grayscale cursor-not-allowed scale-95 border-gray-700 bg-gray-900')
+                         : 'hover:bg-gray-700 hover:shadow-lg active:scale-95';
+
+                      return (
+                        <button
+                          key={note}
+                          onClick={() => checkStaffAnswer(note)}
+                          disabled={isProcessing}
+                          style={{
+                             borderColor: isProcessing && !isSelected ? 'transparent' : `hsl(${hue}, 70%, 50%)`,
+                             color: isProcessing && !isSelected ? '#6b7280' : `hsl(${hue}, 90%, 75%)`,
+                             textShadow: isProcessing && !isSelected ? 'none' : `0 0 10px hsl(${hue}, 70%, 20%)`
+                          }}
+                          className={`
+                            min-w-[3.5rem] w-14 md:w-20 py-3 rounded-lg bg-gray-800 border-2 transition-all font-bold text-base md:text-lg shadow-md
+                            ${processingStyle}
+                          `}
+                        >
+                          {displayNote}
+                        </button>
+                      );
+                    })}
+                  </div>
+               </div>
+            </div>
+          </div>
+        )}
+
         {/* GAME OVER SCREEN */}
         {gameState === GameState.GAME_OVER && (
           <div className="flex flex-col items-center justify-center h-full p-6 animate-fade-in overflow-y-auto">
              <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700 max-w-lg w-full text-center">
                <h2 className="text-3xl font-bold mb-2 text-white">Session Complete</h2>
-               <div className="text-6xl font-black text-amber-500 mb-6">{score}</div>
+               <div className={`text-6xl font-black mb-6 ${currentGameMode === GameMode.STAFF_TO_NOTE ? 'text-purple-400' : 'text-amber-500'}`}>{score}</div>
                <p className="text-gray-400 mb-8">
+                 Mode: <span className={`font-bold ${currentGameMode === GameMode.STAFF_TO_NOTE ? 'text-purple-400' : 'text-blue-400'}`}>
+                   {currentGameMode === GameMode.STAFF_TO_NOTE ? 'Sight Reading' : 'Fretboard Training'}
+                 </span> <br/>
                  Difficulty: <span className="text-white font-bold">{difficulty}</span> <br/>
-                 Max Fret Reached: <span className="text-white font-bold">{currentMaxFret}</span> <br/>
-                 Focus: <span className="text-white font-bold">{gameConfig.focusMode}</span> <br />
-                 Guitar: <span className="text-blue-400 font-bold">{activeGuitar.name}</span>
+                 {currentGameMode === GameMode.FRETBOARD_TO_NOTE && (
+                   <>Max Fret Reached: <span className="text-white font-bold">{currentMaxFret}</span> <br/></>
+                 )}
+                 Focus: <span className="text-white font-bold">{gameConfig.focusMode}</span>
+                 {currentGameMode === GameMode.FRETBOARD_TO_NOTE && (
+                   <><br />Guitar: <span className="text-blue-400 font-bold">{activeGuitar.name}</span></>
+                 )}
                </p>
                <div className="flex gap-4 justify-center">
                  <button onClick={() => setGameState(GameState.MENU)} className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-bold transition-colors">Main Menu</button>
-                 <button onClick={startGame} className="px-6 py-3 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold shadow-lg transition-colors">Try Again</button>
+                 <button
+                   onClick={currentGameMode === GameMode.STAFF_TO_NOTE ? startStaffGame : startGame}
+                   className={`px-6 py-3 text-white rounded-lg font-bold shadow-lg transition-colors ${
+                     currentGameMode === GameMode.STAFF_TO_NOTE
+                       ? 'bg-purple-600 hover:bg-purple-500'
+                       : 'bg-amber-600 hover:bg-amber-500'
+                   }`}
+                 >
+                   Try Again
+                 </button>
                </div>
              </div>
           </div>

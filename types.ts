@@ -2,8 +2,20 @@
 export enum GameState {
   MENU = 'MENU',
   PLAYING = 'PLAYING',
+  PLAYING_STAFF = 'PLAYING_STAFF',  // New: Staff => Note Name game mode
   GAME_OVER = 'GAME_OVER',
   STUDY = 'STUDY'
+}
+
+// Game mode types for future omnidirectional support
+export enum GameMode {
+  FRETBOARD_TO_NOTE = 'FRETBOARD_TO_NOTE',  // Original mode: see fretboard, name note
+  STAFF_TO_NOTE = 'STAFF_TO_NOTE',          // New mode: see staff, name note
+  // Future modes:
+  // NOTE_TO_FRETBOARD = 'NOTE_TO_FRETBOARD',
+  // NOTE_TO_STAFF = 'NOTE_TO_STAFF',
+  // STAFF_TO_FRETBOARD = 'STAFF_TO_FRETBOARD',
+  // FRETBOARD_TO_STAFF = 'FRETBOARD_TO_STAFF',
 }
 
 export enum Difficulty {
@@ -38,6 +50,7 @@ export interface ScoreRecord {
   difficulty: Difficulty;
   maxFret: number;
   focusMode?: FocusMode;
+  gameMode?: GameMode;
 }
 
 export interface Feedback {
@@ -91,3 +104,24 @@ export interface TuningPreset {
 }
 
 export type AccidentalStyle = 'SHARP' | 'FLAT';
+
+// Clef preference for staff game mode
+export type ClefPreference = 'treble' | 'bass' | 'random';
+
+// Note duration types
+export type NoteDurationType = 'w' | 'h' | 'q' | '8' | '16' | 'wd' | 'hd' | 'qd' | '8d';
+
+// Note range for staff game
+export interface NoteRange {
+  lowNote: string;   // e.g., "E2"
+  highNote: string;  // e.g., "E5"
+}
+
+// Staff game specific configuration
+export interface StaffGameConfig {
+  clefPreference: ClefPreference;           // Which clef(s) to use
+  noteDurations: NoteDurationType[] | 'all'; // Which note durations to include, or 'all' for all types
+  noteCount: number;                        // Number of notes per round (1 = single note, 2+ = multi-note)
+  noteRange: NoteRange;                     // Low and high note boundaries
+  useGuitarTransposition: boolean;          // If true, display notes an octave higher (standard guitar notation)
+}
