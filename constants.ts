@@ -181,4 +181,256 @@ export const getOffsetNoteName = (offset: number): string => {
   let absoluteIndex = (baseIndex + offset) % 12;
   if (absoluteIndex < 0) absoluteIndex += 12;
   return NOTES_SHARP[absoluteIndex];
+};
+
+// ============================================================================
+// STAFF NOTATION UTILITIES
+// ============================================================================
+
+/**
+ * Represents a note with its octave for staff notation
+ */
+export interface StaffNoteData {
+  noteName: string;  // e.g., 'C', 'F#', 'Bb'
+  octave: number;    // e.g., 4 for middle C
 }
+
+/**
+ * Guitar standard tuning note ranges (open string to 12th fret):
+ * - String 6 (Low E): E2 to E3
+ * - String 5 (A): A2 to A3
+ * - String 4 (D): D3 to D4
+ * - String 3 (G): G3 to G4
+ * - String 2 (B): B3 to B4
+ * - String 1 (High E): E4 to E5
+ *
+ * Full range: E2 to E5 (roughly 3 octaves)
+ */
+
+// Treble clef comfortable range: C4 (middle C) to G5
+// Bass clef comfortable range: E2 to C4
+// We'll focus on treble clef for the main guitar range (strings 1-4)
+// and bass clef for lower strings (5-6)
+
+/**
+ * Converts a fretboard position to a staff note with octave
+ * @param stringOffset Semitones relative to E2 (0)
+ * @param fretIndex Fret number (0-12)
+ * @returns StaffNoteData with note name and octave
+ */
+export const fretboardToStaffNote = (stringOffset: number, fretIndex: number): StaffNoteData => {
+  // E2 is our reference point (offset 0, fret 0)
+  // E2 is MIDI note 40, which is E in octave 2
+  const totalSemitones = stringOffset + fretIndex;
+
+  // E is at index 4 in our notes array
+  const E_INDEX = 4;
+  const noteIndex = (E_INDEX + totalSemitones) % 12;
+  const normalizedIndex = noteIndex < 0 ? noteIndex + 12 : noteIndex;
+
+  // Calculate octave
+  // E2 = offset 0 => octave 2
+  // Each 12 semitones up = +1 octave
+  // We need to track when we cross C (index 0)
+  const baseOctave = 2;
+  const semitonesFromE2 = totalSemitones;
+
+  // Count how many times we've passed C since E2
+  // E2 is index 4, so we need to go 8 more semitones to reach C3 (index 0)
+  // Then every 12 semitones is another octave
+  let octave = baseOctave;
+  let semitoneCounter = semitonesFromE2;
+
+  // Adjust for notes below E in the same "octave group"
+  // Notes C, C#, D, D# come before E in the octave numbering
+  if (normalizedIndex < E_INDEX) {
+    // We've crossed into the next octave
+    octave += Math.floor((semitonesFromE2 + (12 - E_INDEX)) / 12);
+  } else {
+    octave += Math.floor(semitonesFromE2 / 12);
+  }
+
+  return {
+    noteName: NOTES_SHARP[normalizedIndex],
+    octave
+  };
+};
+
+/**
+ * Generates a random staff note within the guitar's playable range
+ * @param minOctave Minimum octave (default 2 for low E)
+ * @param maxOctave Maximum octave (default 5 for high E at 12th fret)
+ * @param focusMode Focus mode to filter notes
+ * @param keyRoot Optional key root for KEY focus mode
+ * @param keyScale Optional scale type for KEY focus mode
+ */
+export const generateRandomStaffNote = (
+  minOctave: number = 2,
+  maxOctave: number = 5,
+  focusMode: 'ALL' | 'NATURALS' | 'KEY' = 'ALL',
+  keyRoot?: string | null,
+  keyScale?: string | null
+): StaffNoteData => {
+  let availableNotes: string[];
+
+  switch (focusMode) {
+    case 'NATURALS':
+      availableNotes = NATURAL_NOTES;
+      break;
+    case 'KEY':
+      if (keyRoot && keyScale) {
+        availableNotes = getScaleNotes(keyRoot, keyScale as any);
+      } else {
+        availableNotes = NOTES_SHARP;
+      }
+      break;
+    default:
+      availableNotes = NOTES_SHARP;
+  }
+
+  // Generate random note
+  const randomNoteIndex = Math.floor(Math.random() * availableNotes.length);
+  const noteName = availableNotes[randomNoteIndex];
+
+  // Generate random octave within range
+  // Adjust max octave for notes - not all notes go to maxOctave
+  // For guitar, E5 is the practical maximum
+  let randomOctave = Math.floor(Math.random() * (maxOctave - minOctave + 1)) + minOctave;
+
+  // Clamp edge cases (e.g., don't allow E5# since guitar doesn't go that high)
+  const noteIndex = NOTES_SHARP.indexOf(noteName.replace('♯', '#').replace('♭', 'b'));
+  const E_INDEX = 4;
+
+  // If at max octave and note comes after E, reduce octave
+  if (randomOctave === maxOctave && noteIndex > E_INDEX) {
+    randomOctave = maxOctave - 1;
+  }
+
+  // If at min octave and note comes before E, increase octave
+  if (randomOctave === minOctave && noteIndex < E_INDEX) {
+    randomOctave = minOctave + 1;
+  }
+
+  return {
+    noteName,
+    octave: randomOctave
+  };
+};
+
+/**
+ * Determines the best clef for a given note
+ * Returns 'treble' for notes C4 and above, 'bass' for notes below C4
+ */
+export const getRecommendedClef = (note: StaffNoteData): 'treble' | 'bass' => {
+  // Middle C (C4) is the dividing line
+  if (note.octave > 4) return 'treble';
+  if (note.octave < 4) return 'bass';
+
+  // For octave 4, check the note
+  const noteIndex = NOTES_SHARP.indexOf(note.noteName.replace('♯', '#').replace('♭', 'b'));
+  // C is at index 0
+  return noteIndex >= 0 ? 'treble' : 'bass';
+};
+
+/**
+ * Formats a staff note for display (with unicode accidentals)
+ */
+export const formatStaffNoteDisplay = (
+  note: StaffNoteData,
+  accidentalPreference: AccidentalStyle = 'SHARP'
+): string => {
+  return getDisplayNoteName(note.noteName, null, null, accidentalPreference);
+};
+
+/**
+ * Converts a note string like "E2" or "C#4" to a StaffNoteData object
+ */
+export const parseNoteString = (noteStr: string): StaffNoteData | null => {
+  const match = noteStr.match(/^([A-Ga-g][#b]?)(\d)$/);
+  if (!match) return null;
+  return {
+    noteName: match[1].toUpperCase(),
+    octave: parseInt(match[2], 10)
+  };
+};
+
+/**
+ * Converts a StaffNoteData to a comparable number (semitones from C0)
+ */
+export const noteToSemitones = (note: StaffNoteData): number => {
+  const noteIndex = NOTES_SHARP.indexOf(note.noteName.replace('♯', '#').replace('♭', 'b'));
+  if (noteIndex === -1) {
+    // Try flat version
+    const flatIndex = NOTES_FLAT.indexOf(note.noteName.replace('♭', 'b'));
+    if (flatIndex === -1) return 0;
+    return note.octave * 12 + flatIndex;
+  }
+  return note.octave * 12 + noteIndex;
+};
+
+/**
+ * Generates a random staff note within a specific note range (not just octave)
+ * @param lowNote The lowest allowed note (e.g., "E2")
+ * @param highNote The highest allowed note (e.g., "E5")
+ * @param focusMode Focus mode to filter notes
+ * @param keyRoot Optional key root for KEY focus mode
+ * @param keyScale Optional scale type for KEY focus mode
+ */
+export const generateRandomStaffNoteInRange = (
+  lowNote: string,
+  highNote: string,
+  focusMode: 'ALL' | 'NATURALS' | 'KEY' = 'ALL',
+  keyRoot?: string | null,
+  keyScale?: string | null
+): StaffNoteData => {
+  const lowParsed = parseNoteString(lowNote);
+  const highParsed = parseNoteString(highNote);
+
+  if (!lowParsed || !highParsed) {
+    // Fallback to default range
+    return generateRandomStaffNote(2, 5, focusMode, keyRoot, keyScale);
+  }
+
+  const lowSemitones = noteToSemitones(lowParsed);
+  const highSemitones = noteToSemitones(highParsed);
+
+  // Get allowed note names based on focus mode
+  let allowedNoteNames: string[];
+  switch (focusMode) {
+    case 'NATURALS':
+      allowedNoteNames = NATURAL_NOTES;
+      break;
+    case 'KEY':
+      if (keyRoot && keyScale) {
+        allowedNoteNames = getScaleNotes(keyRoot, keyScale as any);
+      } else {
+        allowedNoteNames = NOTES_SHARP;
+      }
+      break;
+    default:
+      allowedNoteNames = NOTES_SHARP;
+  }
+
+  // Build list of all valid notes in range
+  const validNotes: StaffNoteData[] = [];
+
+  for (let octave = lowParsed.octave; octave <= highParsed.octave; octave++) {
+    for (const noteName of allowedNoteNames) {
+      const note: StaffNoteData = { noteName, octave };
+      const semitones = noteToSemitones(note);
+
+      if (semitones >= lowSemitones && semitones <= highSemitones) {
+        validNotes.push(note);
+      }
+    }
+  }
+
+  // If no valid notes found, return middle of range
+  if (validNotes.length === 0) {
+    return { noteName: 'C', octave: 4 };
+  }
+
+  // Pick random note from valid options
+  const randomIndex = Math.floor(Math.random() * validNotes.length);
+  return validNotes[randomIndex];
+};
