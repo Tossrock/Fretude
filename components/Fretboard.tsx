@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Note, PowerupState, PowerupType, ScaleType, AccidentalStyle } from '../types';
-import { getNoteAtPosition, getNoteColor, getNoteHue, NOTES_SHARP, getDisplayNoteName, STANDARD_TUNING_OFFSETS } from '../constants';
+import { getNoteAtPosition, getNoteColor, getNoteHue, NOTES_SHARP, getDisplayNoteName, STANDARD_TUNING_OFFSETS, fretboardToStaffNote } from '../constants';
 
 interface FretboardProps {
   activeNote: Note | null;
@@ -181,6 +181,8 @@ const Fretboard: React.FC<FretboardProps> = ({
     // 2. Standard Game/Study Mode
     const revealedNote = getDisplayedNote(stringIdx, fretIdx);
     const isActive = activeNote?.fretIndex === fretIdx && activeNote?.stringIndex === stringIdx;
+    const staffNote = fretboardToStaffNote(offset, fretIdx);
+    const hoverLabel = `${displayNote}${staffNote.octave}`;
     
     // Determine if the active note's name should be visible
     // Only show if: Study Mode OR explicitly revealed by specific powerup OR if it's revealed by logic (e.g. naturally revealed?)
@@ -196,7 +198,7 @@ const Fretboard: React.FC<FretboardProps> = ({
     return (
       <div className="relative z-20 flex items-center justify-center pointer-events-none">
         {isActive && (
-          <div className={`${dotSize} rounded-full bg-blue-500 border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-bounce z-30 flex items-center justify-center`}>
+          <div className={`${dotSize} rounded-full bg-blue-500 border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-bounce z-30 flex items-center justify-center pointer-events-auto`} title={hoverLabel}>
             {showActiveName && displayNote && (
               <span className={`${fontSize} font-bold text-white drop-shadow-md`}>{displayNote}</span>
             )}
@@ -206,9 +208,10 @@ const Fretboard: React.FC<FretboardProps> = ({
         {revealedNote && !isActive && (
           <div
             className={`
-              ${dotSize} rounded-full flex items-center justify-center ${fontSize} font-bold text-black shadow-md border border-white/20
+              ${dotSize} rounded-full flex items-center justify-center ${fontSize} font-bold text-black shadow-md border border-white/20 pointer-events-auto
             `}
             style={{ backgroundColor: getNoteColor(revealedNote, offset, fretIdx) }}
+            title={hoverLabel}
           >
             {displayNote}
           </div>
